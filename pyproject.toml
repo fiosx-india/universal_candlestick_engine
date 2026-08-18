@@ -1,1 +1,9 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
+[project]
+name = "universal-candlestick-engine"
+version = "0.1.0"
+description = "Streamlit-first universal candlestick and chart-pattern intelligence engine"
+requires-python = ">=3.10"
