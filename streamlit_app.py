@@ -27,6 +27,30 @@ st.caption(
     "probability, not certainty."
 )
 
+# ============================================================
+# RESET INSTRUMENT STATE WHEN EXCHANGE CHANGES
+# ============================================================
+
+def _reset_instrument_selection():
+    """
+    Exchange மாற்றப்பட்டவுடன் பழைய search result,
+    selected instrument மற்றும் previous analysis-ஐ clear செய்கிறது.
+    """
+
+    st.session_state.pop(
+        "instrument_results",
+        None,
+    )
+
+    st.session_state.pop(
+        "selected_instrument",
+        None,
+    )
+
+    st.session_state.pop(
+        "result",
+        None,
+    )
 
 # ============================================================
 # MARKET INPUT
