@@ -73,6 +73,8 @@ with st.sidebar:
             "CDS",
         ],
         index=0,
+        key="exchange",
+        on_change=_reset_instrument_selection,
     )
 
     search_query = st.text_input(
