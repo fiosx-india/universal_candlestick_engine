@@ -250,7 +250,7 @@ if analyze_now:
         ):
 
             result = analyze(
-                symbol,
+                selected_instrument,
                 timeframe,
                 period,
             )
