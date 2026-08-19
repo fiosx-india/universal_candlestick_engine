@@ -692,11 +692,23 @@ class AngelOneDataClient:
             )
         )
 
-        symbol_info = self.resolve_symbol(
-            symbol,
-            exchange=exchange,
-        )
+        if symboltoken:
+            resolved_token = str(
+                symboltoken
+            ).strip()
 
+            symbol_info = {
+                "exchange": exchange,
+                "symbol": symbol,
+                "name": symbol,
+                "token": resolved_token,
+            }
+
+        else:
+            symbol_info = self.resolve_symbol(
+                symbol,
+                exchange=exchange,
+            )
         if end is None:
             end = datetime.now()
 
