@@ -1472,48 +1472,248 @@ def _calculate_probabilities(
 # ============================================================
 
 def analyze(
-    instrument
+    instrument,
     timeframe,
     period=None,
 ):
+    """
+    Analyze the exact Angel One instrument selected by the UI.
+
+    The UI passes the complete instrument dictionary containing:
+        exchange
+        tradingsymbol
+        symboltoken
+
+    The analysis path therefore uses the exact Angel One
+    exchange + trading symbol + symbol token.
+    """
+
+    # --------------------------------------------------------
+    # Validate instrument
+    # --------------------------------------------------------
+
+    if not isinstance(instrument, dict):
+        raise TypeError(
+            "instrument must be the selected Angel One instrument."
+        )
+
+    exchange = str(
+        instrument.get("exchange", "")
+    ).strip().upper()
+
+    symbol = str(
+        instrument.get("tradingsymbol", "")
+    ).strip().upper()
+
+    symboltoken = str(
+        instrument.get("symboltoken", "")
+    ).strip()
+
+    if not exchange:
+        raise ValueError(
+            "Selected instrument is missing exchange."
+        )
+
+    if not symbol:
+        raise ValueError(
+            "Selected instrument is missing tradingsymbol."
+        )
+
+    if not symboltoken:
+        raise ValueError(
+            f"Selected instrument is missing symboltoken "
+            f"for {exchange}:{symbol}"
+        )
+
+    # --------------------------------------------------------
+    # Validate timeframe
+    # --------------------------------------------------------
+
+    timeframe = str(
+        timeframe
+    ).strip().upper()
 
     if timeframe not in TIMEFRAMES:
         raise ValueError(
             f"Unsupported timeframe: {timeframe}"
         )
 
+    # --------------------------------------------------------
+    # Download exact Angel One instrument data
+    # --------------------------------------------------------
+
     data = _download_data(
-        symbol,
-        timeframe,
-        period,
+        symbol=symbol,
+        timeframe=timeframe,
+        period=period,
+        exchange=exchange,
+        symboltoken=symboltoken,
     )
 
-    detected_patterns, all_patterns = (
+    if data is None or data.empty:
+        raise ValueError(
+            f"No market data available for "
+            f"{exchange}:{symbol} | "
+            f"Token {symboltoken} | "
+            f"{timeframe}"
+        )
+
+    # --------------------------------------------------------
+    # Candle + structure detection
+    # --------------------------------------------------------
+
+    detected_names, all_patterns = (
         _build_patterns(data)
     )
+
+    # --------------------------------------------------------
+    # Convert detected pattern names into PatternResult
+    # objects for the existing UI pattern_table().
+    #
+    # The existing project UI expects:
+    #     p.name
+    #     p.direction
+    #     p.state
+    #     p.confidence
+    # --------------------------------------------------------
+
+    from models import PatternResult
+
+    pattern_metadata = {
+        "Doji": (
+            "SIDEWAYS",
+            "CONFIRMED",
+            0.60,
+        ),
+
+        "Hammer": (
+            "BULLISH",
+            "CONFIRMED",
+            0.72,
+        ),
+
+        "Shooting Star": (
+            "BEARISH",
+            "CONFIRMED",
+            0.72,
+        ),
+
+        "Bullish Engulfing": (
+            "BULLISH",
+            "CONFIRMED",
+            0.82,
+        ),
+
+        "Bearish Engulfing": (
+            "BEARISH",
+            "CONFIRMED",
+            0.82,
+        ),
+
+        "Bullish Marubozu": (
+            "BULLISH",
+            "CONFIRMED",
+            0.76,
+        ),
+
+        "Bearish Marubozu": (
+            "BEARISH",
+            "CONFIRMED",
+            0.76,
+        ),
+
+        "Inside Bar": (
+            "SIDEWAYS",
+            "CONFIRMED",
+            0.64,
+        ),
+
+        "Morning Star": (
+            "BULLISH",
+            "CONFIRMED",
+            0.75,
+        ),
+
+        "Evening Star": (
+            "BEARISH",
+            "CONFIRMED",
+            0.75,
+        ),
+
+        "Three Line Strike": (
+            "SIDEWAYS",
+            "CONFIRMED",
+            0.64,
+        ),
+
+        "V Reversal": (
+            "BULLISH",
+            "FORMING",
+            0.65,
+        ),
+
+        "W Pattern": (
+            "BULLISH",
+            "FORMING",
+            0.68,
+        ),
+
+        "M Pattern": (
+            "BEARISH",
+            "FORMING",
+            0.68,
+        ),
+    }
+
+    patterns = []
+
+    for name in detected_names:
+
+        direction, state, confidence = (
+            pattern_metadata.get(
+                name,
+                (
+                    "SIDEWAYS",
+                    "FORMING",
+                    0.50,
+                ),
+            )
+        )
+
+        patterns.append(
+            PatternResult(
+                name=name,
+                direction=direction,
+                state=state,
+                confidence=confidence,
+                score=confidence,
+                timeframe=timeframe,
+                details={
+                    "source": "api.service",
+                    "exchange": exchange,
+                    "symboltoken": symboltoken,
+                },
+            )
+        )
+
+    # --------------------------------------------------------
+    # Trend
+    # --------------------------------------------------------
 
     trend = _calculate_trend(
         data
     )
+
+    # --------------------------------------------------------
+    # Volatility
+    # --------------------------------------------------------
 
     volatility = _calculate_volatility(
         data
     )
 
     # --------------------------------------------------------
-    # Direction probability
-    # --------------------------------------------------------
-    #
-    # UI contract:
-    #   bullish
-    #   bearish
-    #   sideways
-    #
-    # Historical pattern outcomes are used when a qualifying
-    # current pattern exists.
-    # If no qualifying pattern exists, use a conservative
-    # trend-based distribution rather than displaying
-    # misleading 0% / 0% / 0%.
+    # Probability
     # --------------------------------------------------------
 
     probabilities = {
@@ -1525,12 +1725,15 @@ def analyze(
     historical_samples = 0
 
     # --------------------------------------------------------
-    # Aggregate historical evidence from detected patterns
+    # Aggregate historical evidence from currently detected
+    # patterns.
     # --------------------------------------------------------
 
-    for pattern_name in detected_patterns:
+    for pattern_name in detected_names:
 
-        series = all_patterns.get(pattern_name)
+        series = all_patterns.get(
+            pattern_name
+        )
 
         if series is None:
             continue
@@ -1590,9 +1793,8 @@ def analyze(
                 * samples
             )
 
-
     # --------------------------------------------------------
-    # Normalize historical evidence
+    # Historical normalization
     # --------------------------------------------------------
 
     if historical_samples > 0:
@@ -1602,15 +1804,12 @@ def analyze(
             for key, value in probabilities.items()
         }
 
-    else:
+    # --------------------------------------------------------
+    # Conservative fallback when there is no historical
+    # pattern evidence.
+    # --------------------------------------------------------
 
-        # ----------------------------------------------------
-        # No qualifying historical pattern evidence.
-        #
-        # Do NOT report false 0% probabilities.
-        # Use a conservative distribution based on current
-        # trend state only.
-        # ----------------------------------------------------
+    else:
 
         if trend == "BULLISH":
 
@@ -1636,10 +1835,17 @@ def analyze(
                 "sideways": 0.50,
             }
 
+    # --------------------------------------------------------
+    # Final probability normalization
+    # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # Final normalization
-    # --------------------------------------------------------
+    probabilities = {
+        key: max(
+            0.0,
+            float(value),
+        )
+        for key, value in probabilities.items()
+    }
 
     total_probability = sum(
         probabilities.values()
@@ -1658,7 +1864,7 @@ def analyze(
         probabilities = {
             key: value / total_probability
             for key, value in probabilities.items()
-            }
+        }
 
     # --------------------------------------------------------
     # Projection
@@ -1676,10 +1882,8 @@ def analyze(
         data["Low"].tail(20).min()
     )
 
-    projection_direction = trend
-
     projection = {
-        "direction": projection_direction,
+        "direction": trend,
         "upper_zone": recent_high,
         "lower_zone": recent_low,
     }
@@ -1690,12 +1894,15 @@ def analyze(
 
     return {
         "symbol": symbol,
+        "exchange": exchange,
+        "symboltoken": symboltoken,
         "timeframe": timeframe,
         "data": data,
         "last_price": last_price,
         "trend": trend,
         "volatility": volatility,
-        "patterns": detected_patterns,
+        "patterns": patterns,
         "probabilities": probabilities,
         "projection": projection,
-        }
+        "historical_samples": historical_samples,
+}
