@@ -379,12 +379,17 @@ def _download_data(symbol, timeframe, period=None):
         else settings["period"]
     )
 
-    data = yf.download(
-        symbol,
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Always use the centralized safe downloader.
+    #
+    # Do NOT call yf.download() directly here.
+    # --------------------------------------------------------
+
+    data = _safe_yf_download(
+        ticker=symbol,
         period=selected_period,
         interval=settings["interval"],
-        auto_adjust=False,
-        progress=False,
     )
 
     if data is None or data.empty:
@@ -393,12 +398,19 @@ def _download_data(symbol, timeframe, period=None):
             f"at timeframe {timeframe}"
         )
 
-    # Handle yfinance MultiIndex columns.
+    # --------------------------------------------------------
+    # Handle yfinance MultiIndex columns
+    # --------------------------------------------------------
+
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = [
             column[0]
             for column in data.columns
         ]
+
+    # --------------------------------------------------------
+    # Required OHLC columns
+    # --------------------------------------------------------
 
     required = [
         "Open",
@@ -418,6 +430,10 @@ def _download_data(symbol, timeframe, period=None):
             f"Missing OHLC columns: {missing}"
         )
 
+    # --------------------------------------------------------
+    # Clean numeric OHLCV values
+    # --------------------------------------------------------
+
     data = data.copy()
 
     for column in required:
@@ -426,10 +442,74 @@ def _download_data(symbol, timeframe, period=None):
             errors="coerce",
         )
 
+    if "Volume" in data.columns:
+        data["Volume"] = pd.to_numeric(
+            data["Volume"],
+            errors="coerce",
+        )
+
     data.dropna(
         subset=required,
         inplace=True,
     )
+
+    # --------------------------------------------------------
+    # Remove duplicate timestamps
+    # --------------------------------------------------------
+
+    data = data[
+        ~data.index.duplicated(
+            keep="last"
+        )
+    ]
+
+    # --------------------------------------------------------
+    # Sort chronologically
+    # --------------------------------------------------------
+
+    data = data.sort_index()
+
+    # --------------------------------------------------------
+    # Build requested timeframe
+    #
+    # Examples:
+    # 1H  = native 1H
+    # 2H  = 2 x 1H
+    # 4H  = 4 x 1H
+    # 8H  = 8 x 1H
+    #
+    # 1D  = native daily
+    # 2D  = 2 x daily
+    # 15D = 15 x daily
+    #
+    # 1W  = native weekly
+    # 4W  = 4 x weekly
+    #
+    # 1M  = native monthly
+    # 12M = 12 x monthly
+    # --------------------------------------------------------
+
+    data = _aggregate_ohlcv(
+        data,
+        timeframe,
+    )
+
+    if data is None or data.empty:
+        raise ValueError(
+            f"No completed candles available for "
+            f"{symbol} at timeframe {timeframe}"
+        )
+
+    # --------------------------------------------------------
+    # Minimum history validation
+    # --------------------------------------------------------
+
+    if len(data) < 10:
+        raise ValueError(
+            "Not enough historical candles."
+        )
+
+    return data
 
     # ========================================================
     # BUILD THE REQUESTED TIMEFRAME
