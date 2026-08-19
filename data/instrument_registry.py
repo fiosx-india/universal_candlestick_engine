@@ -6,14 +6,17 @@ Purpose:
     Centralize Angel One instrument discovery and resolution.
 
 Important:
-    - No Yahoo symbols.
-    - No hard-coded stock list.
-    - No hard-coded commodity token list.
     - Angel One remains the source of truth.
+    - No hard-coded commodity tokens.
+    - MCX historical-analysis search returns FUT contracts only.
+    - MCX COM / CE / PE entries are excluded from the historical
+      market-analysis selector.
+    - Active/nearest-expiry MCX futures are ranked first.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, date
 from typing import Any
 
 
@@ -33,8 +36,6 @@ SUPPORTED_EXCHANGES = [
 
 # ------------------------------------------------------------
 # COMMON USER ALIASES
-# These are only names/aliases.
-# Tokens are NEVER hard-coded here.
 # ------------------------------------------------------------
 
 ALIASES = {
@@ -46,7 +47,6 @@ ALIASES = {
     "BANK NIFTY": "BANKNIFTY",
 
     "SENSEX": "SENSEX",
-
     "BANKEX": "BANKEX",
 
     "GOLD": "GOLD",
@@ -63,7 +63,6 @@ def normalize_query(value: str) -> str:
 
     value = str(value or "").strip().upper()
 
-    # Remove Yahoo-style suffixes if user accidentally enters them.
     for suffix in (".NS", ".BO"):
         if value.endswith(suffix):
             value = value[:-len(suffix)]
@@ -101,42 +100,194 @@ def _safe_row(row: Any) -> dict[str, Any] | None:
     }
 
 
+# ------------------------------------------------------------
+# MCX HISTORICAL-ANALYSIS ELIGIBILITY
+# ------------------------------------------------------------
+
+def _is_mcx_historical_candidate(
+    row: dict[str, Any],
+) -> bool:
+    """
+    Keep only MCX futures suitable for historical OHLC analysis.
+
+    Angel One's MCX search can return:
+        - COM/reference entries
+        - FUT contracts
+        - CE options
+        - PE options
+
+    This engine analyses the underlying futures price series, so
+    only FUT contracts are allowed into the historical selector.
+    """
+
+    symbol = str(
+        row.get("tradingsymbol") or ""
+    ).strip().upper()
+
+    instrument_type = str(
+        row.get("instrumenttype") or ""
+    ).strip().upper()
+
+    # Explicitly reject option contracts.
+    if symbol.endswith("CE") or symbol.endswith("PE"):
+        return False
+
+    # Explicitly reject commodity/reference entries.
+    if symbol.endswith("COM"):
+        return False
+
+    # MCX futures are normally identified by FUT in the trading
+    # symbol and/or instrument type. Prefer the symbol because it
+    # is the exact value sent to the historical API.
+    if "FUT" in symbol:
+        return True
+
+    if instrument_type in {
+        "FUTCOM",
+        "FUTIDX",
+        "FUTSTK",
+    }:
+        return True
+
+    return False
+
+
+# ------------------------------------------------------------
+# EXPIRY PARSING / RANKING
+# ------------------------------------------------------------
+
+def _parse_expiry(value: Any) -> date | None:
+    """Parse common Angel One expiry representations."""
+
+    if value is None:
+        return None
+
+    text = str(value).strip().upper()
+
+    if not text:
+        return None
+
+    formats = (
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%d%b%Y",
+        "%d%b%y",
+        "%d-%b-%Y",
+        "%d-%b-%y",
+        "%Y%m%d",
+    )
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(
+                text,
+                fmt,
+            ).date()
+        except ValueError:
+            continue
+
+    # Some feeds may provide ISO timestamps.
+    try:
+        return datetime.fromisoformat(
+            text.replace("Z", "+00:00")
+        ).date()
+    except ValueError:
+        return None
+
+
+def _expiry_rank(
+    row: dict[str, Any],
+) -> tuple[int, int]:
+    """
+    Rank MCX futures by expiry.
+
+    Active future:
+        expiry >= today
+
+    Nearest future:
+        smallest positive number of days to expiry
+
+    Unknown expiry:
+        placed after known expiries.
+    """
+
+    expiry = _parse_expiry(
+        row.get("expiry")
+    )
+
+    if expiry is None:
+        return (1, 10**9)
+
+    days = (
+        expiry - date.today()
+    ).days
+
+    if days < 0:
+        return (1, days)
+
+    return (0, days)
+
+
+# ------------------------------------------------------------
+# SEARCH RANKING
+# ------------------------------------------------------------
+
 def rank_instrument(
     row: dict[str, Any],
     query: str,
     exchange: str,
-) -> tuple[int, int, int, str]:
+) -> tuple:
     """
     Rank Angel One search results.
 
-    Higher quality instruments come first.
+    For NSE/BSE:
+        exact symbol > -EQ > exact name > prefix > shorter symbol
 
-    Priority:
-        1. Exact trading symbol
-        2. Equity -EQ
-        3. Exact name
-        4. Prefix match
-        5. Contains match
+    For MCX:
+        exact match > active FUT > nearest expiry > exact name/prefix
+        > shorter symbol
     """
 
     symbol = row["tradingsymbol"].upper()
     name = row["name"].upper()
     query = query.upper()
+    exchange = exchange.upper()
 
-    exact = 1 if symbol == query else 0
-    equity = 1 if symbol == f"{query}-EQ" else 0
-    exact_name = 1 if name == query else 0
-    prefix = 1 if symbol.startswith(query) else 0
+    exact = int(symbol == query)
+    equity = int(symbol == f"{query}-EQ")
+    exact_name = int(name == query)
+    prefix = int(symbol.startswith(query))
 
-    # Smaller string length wins when otherwise similar.
+    if exchange == "MCX":
+        expiry_state, expiry_days = _expiry_rank(row)
+
+        # Futures must already have passed the eligibility filter.
+        # Active/nearest-expiry contracts are preferred.
+        return (
+            exact,
+            1,
+            -expiry_state,
+            -expiry_days,
+            exact_name,
+            prefix,
+            -len(symbol),
+            symbol,
+        )
+
     return (
         exact,
         equity,
         exact_name,
         prefix,
         -len(symbol),
+        symbol,
     )
 
+
+# ------------------------------------------------------------
+# SEARCH
+# ------------------------------------------------------------
 
 def search_instruments(
     angel_client: Any,
@@ -147,13 +298,14 @@ def search_instruments(
     """
     Search Angel One instruments.
 
-    `angel_client` must be the authenticated SmartConnect
-    client already owned by AngelOneDataClient.
-
-    No second login is created here.
+    For MCX historical analysis, only futures contracts are returned.
+    For all other exchanges, existing search behaviour is preserved.
     """
 
-    exchange = str(exchange or "").strip().upper()
+    exchange = str(
+        exchange or ""
+    ).strip().upper()
+
     query = normalize_query(query)
 
     if exchange not in SUPPORTED_EXCHANGES:
@@ -185,7 +337,17 @@ def search_instruments(
         if row is None:
             continue
 
-        if row["exchange"] and row["exchange"] != exchange:
+        if (
+            row["exchange"]
+            and row["exchange"] != exchange
+        ):
+            continue
+
+        # MCX historical-analysis filter.
+        if (
+            exchange == "MCX"
+            and not _is_mcx_historical_candidate(row)
+        ):
             continue
 
         results.append(row)
@@ -202,6 +364,10 @@ def search_instruments(
     return results[:max(1, int(limit))]
 
 
+# ------------------------------------------------------------
+# RESOLUTION
+# ------------------------------------------------------------
+
 def resolve_instrument(
     angel_client: Any,
     exchange: str,
@@ -210,32 +376,50 @@ def resolve_instrument(
     """
     Resolve one user instrument into the exact Angel One
     trading symbol and symbol token.
+
+    MCX resolution never falls back to COM / CE / PE entries.
     """
+
+    exchange = str(
+        exchange or ""
+    ).strip().upper()
+
+    requested = normalize_query(query)
 
     results = search_instruments(
         angel_client=angel_client,
         exchange=exchange,
-        query=query,
+        query=requested,
         limit=50,
     )
 
     if not results:
+        if exchange == "MCX":
+            raise ValueError(
+                f"No usable MCX FUT contract found for "
+                f"{requested}."
+            )
+
         raise ValueError(
             f"Angel One instrument not found: "
-            f"{normalize_query(query)} on {exchange}"
+            f"{requested} on {exchange}"
         )
 
-    requested = normalize_query(query)
-
-    # Exact match first.
+    # Exact symbol match first.
     for row in results:
-        if row["tradingsymbol"].upper() == requested:
+        if (
+            row["tradingsymbol"].upper()
+            == requested
+        ):
             return row
 
-    # Equity match next.
+    # Regular equity match next.
     for row in results:
-        if row["tradingsymbol"].upper() == f"{requested}-EQ":
+        if (
+            row["tradingsymbol"].upper()
+            == f"{requested}-EQ"
+        ):
             return row
 
-    # Otherwise use the highest-ranked result.
+    # MCX: search results are already filtered and expiry-ranked.
     return results[0]
