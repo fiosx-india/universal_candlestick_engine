@@ -11,64 +11,289 @@ from historical.outcomes import forward_outcomes_all
 # ============================================================
 
 TIMEFRAME_SETTINGS = {
-    "1m": {"interval": "1m", "period": "7d"},
-    "5m": {"interval": "5m", "period": "60d"},
-    "15m": {"interval": "15m", "period": "60d"},
-    "30m": {"interval": "30m", "period": "60d"},
-    "45m": {"interval": "45m", "period": "60d"},
+    # --------------------------------------------------------
+    # Intraday base timeframes
+    # --------------------------------------------------------
+    "1m": {
+        "interval": "1m",
+        "period": "7d",
+        "base_timeframe": "1m",
+        "multiplier": 1,
+    },
+
+    "5m": {
+        "interval": "5m",
+        "period": "60d",
+        "base_timeframe": "5m",
+        "multiplier": 1,
+    },
+
+    "15m": {
+        "interval": "15m",
+        "period": "60d",
+        "base_timeframe": "15m",
+        "multiplier": 1,
+    },
+
+    "30m": {
+        "interval": "30m",
+        "period": "60d",
+        "base_timeframe": "30m",
+        "multiplier": 1,
+    },
+
+    # 45m is built from 15m candles.
+    # Do NOT request a native 45m Yahoo interval.
+    "45m": {
+        "interval": "15m",
+        "period": "60d",
+        "base_timeframe": "15m",
+        "multiplier": 3,
+    },
 
     # --------------------------------------------------------
-    # Hourly base data
-    # 2H-8H will be aggregated from 1H candles
+    # Hourly timeframes
+    # 2H-8H are constructed from 1H candles.
     # --------------------------------------------------------
-    "1H": {"interval": "1h", "period": "2y"},
-    "2H": {"interval": "1h", "period": "2y"},
-    "3H": {"interval": "1h", "period": "2y"},
-    "4H": {"interval": "1h", "period": "2y"},
-    "5H": {"interval": "1h", "period": "2y"},
-    "6H": {"interval": "1h", "period": "2y"},
-    "7H": {"interval": "1h", "period": "2y"},
-    "8H": {"interval": "1h", "period": "2y"},
+    "1H": {
+        "interval": "1h",
+        "period": "2y",
+        "base_timeframe": "1H",
+        "multiplier": 1,
+    },
+
+    "2H": {
+        "interval": "1h",
+        "period": "2y",
+        "base_timeframe": "1H",
+        "multiplier": 2,
+    },
+
+    "3H": {
+        "interval": "1h",
+        "period": "2y",
+        "base_timeframe": "1H",
+        "multiplier": 3,
+    },
+
+    "4H": {
+        "interval": "1h",
+        "period": "2y",
+        "base_timeframe": "1H",
+        "multiplier": 4,
+    },
+
+    "5H": {
+        "interval": "1h",
+        "period": "2y",
+        "base_timeframe": "1H",
+        "multiplier": 5,
+    },
+
+    "6H": {
+        "interval": "1h",
+        "period": "2y",
+        "base_timeframe": "1H",
+        "multiplier": 6,
+    },
+
+    "7H": {
+        "interval": "1h",
+        "period": "2y",
+        "base_timeframe": "1H",
+        "multiplier": 7,
+    },
+
+    "8H": {
+        "interval": "1h",
+        "period": "2y",
+        "base_timeframe": "1H",
+        "multiplier": 8,
+    },
 
     # --------------------------------------------------------
-    # Daily base data
-    # 2D-15D will be aggregated from 1D candles
+    # Daily timeframes
     # --------------------------------------------------------
-    "1D": {"interval": "1d", "period": "5y"},
-    "2D": {"interval": "1d", "period": "5y"},
-    "3D": {"interval": "1d", "period": "5y"},
-    "4D": {"interval": "1d", "period": "5y"},
-    "5D": {"interval": "1d", "period": "5y"},
-    "6D": {"interval": "1d", "period": "5y"},
-    "7D": {"interval": "1d", "period": "5y"},
-    "10D": {"interval": "1d", "period": "5y"},
-    "15D": {"interval": "1d", "period": "5y"},
+    "1D": {
+        "interval": "1d",
+        "period": "5y",
+        "base_timeframe": "1D",
+        "multiplier": 1,
+    },
+
+    "2D": {
+        "interval": "1d",
+        "period": "5y",
+        "base_timeframe": "1D",
+        "multiplier": 2,
+    },
+
+    "3D": {
+        "interval": "1d",
+        "period": "5y",
+        "base_timeframe": "1D",
+        "multiplier": 3,
+    },
+
+    "4D": {
+        "interval": "1d",
+        "period": "5y",
+        "base_timeframe": "1D",
+        "multiplier": 4,
+    },
+
+    "5D": {
+        "interval": "1d",
+        "period": "5y",
+        "base_timeframe": "1D",
+        "multiplier": 5,
+    },
+
+    "6D": {
+        "interval": "1d",
+        "period": "5y",
+        "base_timeframe": "1D",
+        "multiplier": 6,
+    },
+
+    "7D": {
+        "interval": "1d",
+        "period": "5y",
+        "base_timeframe": "1D",
+        "multiplier": 7,
+    },
+
+    "10D": {
+        "interval": "1d",
+        "period": "5y",
+        "base_timeframe": "1D",
+        "multiplier": 10,
+    },
+
+    "15D": {
+        "interval": "1d",
+        "period": "5y",
+        "base_timeframe": "1D",
+        "multiplier": 15,
+    },
 
     # --------------------------------------------------------
-    # Weekly base data
-    # 2W-4W will be aggregated from 1W candles
+    # Weekly timeframes
     # --------------------------------------------------------
-    "1W": {"interval": "1wk", "period": "10y"},
-    "2W": {"interval": "1wk", "period": "10y"},
-    "3W": {"interval": "1wk", "period": "10y"},
-    "4W": {"interval": "1wk", "period": "10y"},
+    "1W": {
+        "interval": "1wk",
+        "period": "10y",
+        "base_timeframe": "1W",
+        "multiplier": 1,
+    },
+
+    "2W": {
+        "interval": "1wk",
+        "period": "10y",
+        "base_timeframe": "1W",
+        "multiplier": 2,
+    },
+
+    "3W": {
+        "interval": "1wk",
+        "period": "10y",
+        "base_timeframe": "1W",
+        "multiplier": 3,
+    },
+
+    "4W": {
+        "interval": "1wk",
+        "period": "10y",
+        "base_timeframe": "1W",
+        "multiplier": 4,
+    },
 
     # --------------------------------------------------------
-    # Monthly base data
-    # 2M-12M will be aggregated from 1M candles
+    # Monthly timeframes
     # --------------------------------------------------------
-    "1M": {"interval": "1mo", "period": "10y"},
-    "2M": {"interval": "1mo", "period": "10y"},
-    "3M": {"interval": "1mo", "period": "10y"},
-    "4M": {"interval": "1mo", "period": "10y"},
-    "5M": {"interval": "1mo", "period": "10y"},
-    "6M": {"interval": "1mo", "period": "10y"},
-    "7M": {"interval": "1mo", "period": "10y"},
-    "8M": {"interval": "1mo", "period": "10y"},
-    "9M": {"interval": "1mo", "period": "10y"},
-    "10M": {"interval": "1mo", "period": "10y"},
-    "11M": {"interval": "1mo", "period": "10y"},
-    "12M": {"interval": "1mo", "period": "10y"},
+    "1M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 1,
+    },
+
+    "2M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 2,
+    },
+
+    "3M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 3,
+    },
+
+    "4M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 4,
+    },
+
+    "5M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 5,
+    },
+
+    "6M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 6,
+    },
+
+    "7M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 7,
+    },
+
+    "8M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 8,
+    },
+
+    "9M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 9,
+    },
+
+    "10M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 10,
+    },
+
+    "11M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 11,
+    },
+
+    "12M": {
+        "interval": "1mo",
+        "period": "10y",
+        "base_timeframe": "1M",
+        "multiplier": 12,
+    },
 }
 
 
