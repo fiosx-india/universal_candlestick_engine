@@ -1,11 +1,13 @@
+import os
+import re
+from datetime import datetime, timedelta
+
 import numpy as np
 import pandas as pd
-import yfinance as yf
-import random
-import time
 
 from constants import TIMEFRAMES, PATTERN_GROUPS
 from historical.outcomes import forward_outcomes_all
+from data.angel_one import AngelOneDataClient
 
 
 # ============================================================
@@ -359,7 +361,384 @@ def _safe_yf_download(
         f"{max_retries} attempts."
     )
 
+# ============================================================
+# ANGEL ONE CREDENTIALS
+# ============================================================
 
+def _get_secret(name):
+    """
+    Read a secret safely.
+
+    Priority:
+        1. Streamlit secrets
+        2. Environment variable
+
+    No credentials are hard-coded in source code.
+    """
+
+    # Streamlit Cloud / local Streamlit secrets
+    try:
+        import streamlit as st
+
+        value = st.secrets.get(name)
+
+        if value:
+            return str(value).strip()
+
+    except Exception:
+        pass
+
+    # Environment variable fallback
+    value = os.getenv(name)
+
+    if value:
+        return str(value).strip()
+
+    return ""
+
+
+# ============================================================
+# ANGEL ONE CLIENT
+# ============================================================
+
+_ANGEL_CLIENT = None
+
+
+def _get_angel_client():
+    """
+    Create and cache one Angel One historical-data client.
+    """
+
+    global _ANGEL_CLIENT
+
+    if _ANGEL_CLIENT is not None:
+        return _ANGEL_CLIENT
+
+    api_key = _get_secret("ANGEL_API_KEY")
+    client_code = _get_secret("ANGEL_CLIENT_CODE")
+    mpin = _get_secret("ANGEL_MPIN")
+    totp_secret = _get_secret("ANGEL_TOTP_SECRET")
+
+    missing = []
+
+    if not api_key:
+        missing.append("ANGEL_API_KEY")
+
+    if not client_code:
+        missing.append("ANGEL_CLIENT_CODE")
+
+    if not mpin:
+        missing.append("ANGEL_MPIN")
+
+    if not totp_secret:
+        missing.append("ANGEL_TOTP_SECRET")
+
+    if missing:
+        raise RuntimeError(
+            "Angel One credentials are missing: "
+            + ", ".join(missing)
+        )
+
+    _ANGEL_CLIENT = AngelOneDataClient(
+        api_key=api_key,
+        client_code=client_code,
+        mpin=mpin,
+        totp_secret=totp_secret,
+    )
+
+    return _ANGEL_CLIENT
+
+
+# ============================================================
+# SYMBOL / EXCHANGE RESOLUTION
+# ============================================================
+
+def _resolve_exchange(symbol):
+    """
+    Resolve common user-facing symbols.
+
+    RELIANCE.NS -> NSE
+    TCS.NS      -> NSE
+    RELIANCE.BO -> BSE
+
+    Plain equity symbols default to NSE.
+    """
+
+    value = str(symbol).strip().upper()
+
+    if value.endswith(".BO"):
+        return "BSE"
+
+    return "NSE"
+
+
+def _resolve_angel_symbol(symbol):
+    """
+    Convert Yahoo-style symbols into Angel One searchable symbols.
+    """
+
+    value = str(symbol).strip().upper()
+
+    if value.endswith(".NS"):
+        return value[:-3]
+
+    if value.endswith(".BO"):
+        return value[:-3]
+
+    return value
+
+
+# ============================================================
+# PERIOD -> DATE RANGE
+# ============================================================
+
+def _period_to_days(period):
+    """
+    Convert common UI period values into a safe day count.
+    """
+
+    if period is None:
+        return 365
+
+    value = str(period).strip().lower()
+
+    match = re.fullmatch(
+        r"(\d+)\s*([dwmy])",
+        value,
+    )
+
+    if not match:
+        return 365
+
+    number = int(match.group(1))
+    unit = match.group(2)
+
+    if unit == "d":
+        return number
+
+    if unit == "w":
+        return number * 7
+
+    if unit == "m":
+        return number * 30
+
+    if unit == "y":
+        return number * 365
+
+    return 365
+
+
+# ============================================================
+# ANGEL ONE HISTORICAL DATA DOWNLOAD
+# ============================================================
+
+def _download_angel_data(
+    symbol,
+    timeframe,
+    period=None,
+):
+    """
+    Download normalized OHLCV data from Angel One.
+
+    This is the ONLY market-data download path used by
+    api/service.py.
+    """
+
+    timeframe = str(
+        timeframe
+    ).strip().upper()
+
+    if timeframe not in TIMEFRAME_SETTINGS:
+        raise ValueError(
+            f"Unsupported timeframe: {timeframe}"
+        )
+
+    settings = TIMEFRAME_SETTINGS[
+        timeframe
+    ]
+
+    angel_interval = settings[
+        "base_timeframe"
+    ]
+
+    # Angel One native interval names used by
+    # data/angel_one.py
+    interval_map = {
+        "1m": "1m",
+        "5m": "5m",
+        "15m": "15m",
+        "30m": "30m",
+        "1H": "1H",
+        "1D": "1D",
+    }
+
+    # --------------------------------------------------------
+    # For derived timeframes, download the base timeframe.
+    #
+    # Examples:
+    # 45m -> 15m
+    # 2H  -> 1H
+    # 8H  -> 1H
+    # 2D  -> 1D
+    # 15D -> 1D
+    # --------------------------------------------------------
+
+    if angel_interval not in interval_map:
+        raise ValueError(
+            f"Angel One base timeframe is not supported: "
+            f"{angel_interval}"
+        )
+
+    native_interval = interval_map[
+        angel_interval
+    ]
+
+    selected_period = (
+        period
+        if period is not None
+        else settings["period"]
+    )
+
+    days = _period_to_days(
+        selected_period
+    )
+
+    end = datetime.now()
+
+    start = (
+        end
+        - timedelta(days=days)
+    )
+
+    exchange = _resolve_exchange(
+        symbol
+    )
+
+    angel_symbol = _resolve_angel_symbol(
+        symbol
+    )
+
+    client = _get_angel_client()
+
+    data = client.get_historical_data(
+        symbol=angel_symbol,
+        interval=native_interval,
+        start=start,
+        end=end,
+        exchange=exchange,
+    )
+
+    if data is None or data.empty:
+        raise ValueError(
+            f"Angel One returned no market data for "
+            f"{symbol} | {timeframe}"
+        )
+
+    # --------------------------------------------------------
+    # Standardize columns
+    # --------------------------------------------------------
+
+    data = data.copy()
+
+    required = [
+        "Open",
+        "High",
+        "Low",
+        "Close",
+    ]
+
+    for column in required:
+        if column not in data.columns:
+            raise ValueError(
+                f"Angel One data missing column: {column}"
+            )
+
+        data[column] = pd.to_numeric(
+            data[column],
+            errors="coerce",
+        )
+
+    if "Volume" in data.columns:
+        data["Volume"] = pd.to_numeric(
+            data["Volume"],
+            errors="coerce",
+        )
+
+    data.dropna(
+        subset=required,
+        inplace=True,
+    )
+
+    data = data[
+        ~data.index.duplicated(
+            keep="last"
+        )
+    ]
+
+    data = data.sort_index()
+
+    return data
+
+
+# ============================================================
+# DATA LOADER
+# ============================================================
+
+def _download_data(
+    symbol,
+    timeframe,
+    period=None,
+):
+    """
+    Central market-data entry point.
+
+    Yahoo Finance is intentionally NOT used here.
+    """
+
+    timeframe = str(
+        timeframe
+    ).strip().upper()
+
+    if timeframe not in TIMEFRAME_SETTINGS:
+        raise ValueError(
+            f"Unsupported timeframe: {timeframe}"
+        )
+
+    data = _download_angel_data(
+        symbol=symbol,
+        timeframe=timeframe,
+        period=period,
+    )
+
+    if data is None or data.empty:
+        raise ValueError(
+            f"No market data available for "
+            f"{symbol} at {timeframe}"
+        )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Existing timeframe aggregation engine remains intact.
+    # --------------------------------------------------------
+
+    data = _aggregate_ohlcv(
+        data,
+        timeframe,
+    )
+
+    if data is None or data.empty:
+        raise ValueError(
+            f"No completed candles available for "
+            f"{symbol} at {timeframe}"
+        )
+
+    if len(data) < 10:
+        raise ValueError(
+            "Not enough historical candles."
+        )
+
+    return data
+    
 # ============================================================
 # DATA LOADER
 # ============================================================
