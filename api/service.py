@@ -1,362 +1,720 @@
 import numpy as np
 import pandas as pd
+import yfinance as yf
+
+from constants import TIMEFRAMES, PATTERN_GROUPS
+from historical.outcomes import forward_outcomes_all
 
 
 # ============================================================
-# UNIVERSAL FORWARD OUTCOME HORIZONS
-# ============================================================
-#
-# N = number of bars forward on the CURRENT analysis timeframe.
-#
-# Example:
-#   1H chart:
-#       1H = 1 bar
-#       2H = 2 bars
-#       ...
-#       8H = 8 bars
-#
-#   1D chart:
-#       1D = 1 bar
-#       2D = 2 bars
-#       ...
-#       15D = 15 bars
-#
-#   1W chart:
-#       1W = 1 bar
-#       2W = 2 bars
-#       ...
-#
-#   1M chart:
-#       1M = 1 bar
-#       ...
-#       12M = 12 bars
-#
-# IMPORTANT:
-# These are historical probabilities.
-# They are NOT guaranteed future predictions.
+# TIMEFRAME DATA SETTINGS
 # ============================================================
 
-HORIZON_BARS = {
-
-    # --------------------------------------------------------
-    # INTRADAY / HOURLY
-    # --------------------------------------------------------
-    "1H": 1,
-    "2H": 2,
-    "3H": 3,
-    "4H": 4,
-    "5H": 5,
-    "6H": 6,
-    "7H": 7,
-    "8H": 8,
-
-    # --------------------------------------------------------
-    # DAILY
-    # --------------------------------------------------------
-    "1D": 1,
-    "2D": 2,
-    "3D": 3,
-    "4D": 4,
-    "5D": 5,
-    "6D": 6,
-    "7D": 7,
-    "10D": 10,
-    "15D": 15,
-
-    # --------------------------------------------------------
-    # WEEKLY
-    # --------------------------------------------------------
-    "1W": 1,
-    "2W": 2,
-    "3W": 3,
-    "4W": 4,
-
-    # --------------------------------------------------------
-    # MONTHLY
-    # --------------------------------------------------------
-    "1M": 1,
-    "2M": 2,
-    "3M": 3,
-    "4M": 4,
-    "5M": 5,
-    "6M": 6,
-    "7M": 7,
-    "8M": 8,
-    "9M": 9,
-    "10M": 10,
-    "11M": 11,
-    "12M": 12,
+TIMEFRAME_SETTINGS = {
+    "1m": {
+        "interval": "1m",
+        "period": "7d",
+    },
+    "5m": {
+        "interval": "5m",
+        "period": "60d",
+    },
+    "15m": {
+        "interval": "15m",
+        "period": "60d",
+    },
+    "30m": {
+        "interval": "30m",
+        "period": "60d",
+    },
+    "45m": {
+        "interval": "45m",
+        "period": "60d",
+    },
+    "1H": {
+        "interval": "1h",
+        "period": "2y",
+    },
+    "2H": {
+        "interval": "1h",
+        "period": "2y",
+    },
+    "3H": {
+        "interval": "1h",
+        "period": "2y",
+    },
+    "4H": {
+        "interval": "1h",
+        "period": "2y",
+    },
+    "5H": {
+        "interval": "1h",
+        "period": "2y",
+    },
+    "6H": {
+        "interval": "1h",
+        "period": "2y",
+    },
+    "7H": {
+        "interval": "1h",
+        "period": "2y",
+    },
+    "8H": {
+        "interval": "1h",
+        "period": "2y",
+    },
+    "1D": {
+        "interval": "1d",
+        "period": "5y",
+    },
+    "2D": {
+        "interval": "1d",
+        "period": "5y",
+    },
+    "3D": {
+        "interval": "1d",
+        "period": "5y",
+    },
+    "4D": {
+        "interval": "1d",
+        "period": "5y",
+    },
+    "5D": {
+        "interval": "1d",
+        "period": "5y",
+    },
+    "6D": {
+        "interval": "1d",
+        "period": "5y",
+    },
+    "7D": {
+        "interval": "1d",
+        "period": "5y",
+    },
+    "10D": {
+        "interval": "1d",
+        "period": "5y",
+    },
+    "15D": {
+        "interval": "1d",
+        "period": "5y",
+    },
+    "1W": {
+        "interval": "1wk",
+        "period": "10y",
+    },
+    "2W": {
+        "interval": "1wk",
+        "period": "10y",
+    },
+    "3W": {
+        "interval": "1wk",
+        "period": "10y",
+    },
+    "4W": {
+        "interval": "1wk",
+        "period": "10y",
+    },
+    "1M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "2M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "3M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "4M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "5M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "6M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "7M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "8M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "9M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "10M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "11M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
+    "12M": {
+        "interval": "1mo",
+        "period": "10y",
+    },
 }
 
 
 # ============================================================
-# INTERNAL INDEX POSITION RESOLVER
+# DATA LOADER
 # ============================================================
 
-def _position(index, idx):
-    """
-    Convert a dataframe index label into an integer row position.
+def _download_data(symbol, timeframe, period=None):
 
-    This keeps the outcome engine safe when working with
-    DatetimeIndex or other pandas index types.
-    """
-
-    try:
-        loc = index.get_loc(idx)
-
-    except KeyError:
-        return None
-
-    # Normal unique index
-    if isinstance(loc, (int, np.integer)):
-        return int(loc)
-
-    # Duplicate index protection
-    if isinstance(loc, slice):
-        return int(loc.start)
-
-    if isinstance(loc, np.ndarray) and loc.size:
-        positions = np.flatnonzero(loc)
-
-        if positions.size:
-            return int(positions[0])
-
-    return None
-
-
-# ============================================================
-# SINGLE HORIZON OUTCOME CALCULATOR
-# ============================================================
-
-def forward_outcomes(
-    df: pd.DataFrame,
-    occurrence_indices,
-    horizon: str,
-    bullish_threshold: float = 0.002,
-    bearish_threshold: float = -0.002,
-):
-    """
-    Calculate historical price outcomes after a detected pattern.
-
-    Parameters
-    ----------
-    df:
-        OHLC dataframe containing at least a Close column.
-
-    occurrence_indices:
-        Index values where the historical pattern occurred.
-
-    horizon:
-        Example:
-            1H, 2H, 4H, 8H
-            1D, 2D, 5D, 15D
-            1W, 2W
-            1M, 3M, 12M
-
-    bullish_threshold:
-        Minimum return considered meaningfully bullish.
-        Default = +0.20%.
-
-    bearish_threshold:
-        Maximum return considered meaningfully bearish.
-        Default = -0.20%.
-
-    Returns
-    -------
-    dict or None
-    """
-
-    # --------------------------------------------------------
-    # Validate horizon
-    # --------------------------------------------------------
-
-    if horizon not in HORIZON_BARS:
-        return None
-
-    if df is None or df.empty:
-        return None
-
-    if "Close" not in df.columns:
-        return None
-
-    bars_forward = HORIZON_BARS[horizon]
-
-    if bars_forward < 1:
-        return None
-
-    # --------------------------------------------------------
-    # Clean close series
-    # --------------------------------------------------------
-
-    close = pd.to_numeric(
-        df["Close"],
-        errors="coerce",
-    )
-
-    returns = []
-
-    # --------------------------------------------------------
-    # Evaluate every historical occurrence
-    # --------------------------------------------------------
-
-    for occurrence_index in occurrence_indices:
-
-        position = _position(
-            df.index,
-            occurrence_index,
+    if timeframe not in TIMEFRAME_SETTINGS:
+        raise ValueError(
+            f"Unsupported timeframe: {timeframe}"
         )
 
-        if position is None:
+    settings = TIMEFRAME_SETTINGS[timeframe]
+
+    selected_period = (
+        period
+        if period is not None
+        else settings["period"]
+    )
+
+    data = yf.download(
+        symbol,
+        period=selected_period,
+        interval=settings["interval"],
+        auto_adjust=False,
+        progress=False,
+    )
+
+    if data is None or data.empty:
+        raise ValueError(
+            f"No market data available for {symbol} "
+            f"at timeframe {timeframe}"
+        )
+
+    # Handle yfinance MultiIndex columns.
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = [
+            column[0]
+            for column in data.columns
+        ]
+
+    required = [
+        "Open",
+        "High",
+        "Low",
+        "Close",
+    ]
+
+    missing = [
+        column
+        for column in required
+        if column not in data.columns
+    ]
+
+    if missing:
+        raise ValueError(
+            f"Missing OHLC columns: {missing}"
+        )
+
+    data = data.copy()
+
+    for column in required:
+        data[column] = pd.to_numeric(
+            data[column],
+            errors="coerce",
+        )
+
+    data.dropna(
+        subset=required,
+        inplace=True,
+    )
+
+    if len(data) < 10:
+        raise ValueError(
+            "Not enough historical candles."
+        )
+
+    return data
+
+
+# ============================================================
+# BASIC CANDLE CALCULATIONS
+# ============================================================
+
+def _candle_features(data):
+
+    O = data["Open"]
+    H = data["High"]
+    L = data["Low"]
+    C = data["Close"]
+
+    body = (C - O).abs()
+
+    candle_range = (
+        H - L
+    ).replace(0, np.nan)
+
+    upper_shadow = (
+        H - pd.concat([O, C], axis=1).max(axis=1)
+    )
+
+    lower_shadow = (
+        pd.concat([O, C], axis=1).min(axis=1) - L
+    )
+
+    bullish = C > O
+    bearish = C < O
+
+    return (
+        O,
+        H,
+        L,
+        C,
+        body,
+        candle_range,
+        upper_shadow,
+        lower_shadow,
+        bullish,
+        bearish,
+    )
+
+
+# ============================================================
+# CANDLESTICK PATTERNS
+# ============================================================
+
+def _detect_candlestick_patterns(data):
+
+    (
+        O,
+        H,
+        L,
+        C,
+        body,
+        candle_range,
+        upper_shadow,
+        lower_shadow,
+        bullish,
+        bearish,
+    ) = _candle_features(data)
+
+    safe_range = candle_range.fillna(0)
+
+    patterns = {}
+
+    # --------------------------------------------------------
+    # Doji
+    # --------------------------------------------------------
+
+    patterns["Doji"] = (
+        body <= safe_range * 0.10
+    )
+
+    # --------------------------------------------------------
+    # Hammer
+    # --------------------------------------------------------
+
+    patterns["Hammer"] = (
+        (body <= safe_range * 0.35)
+        & (lower_shadow >= body * 1.5)
+        & (upper_shadow <= body * 0.75)
+    )
+
+    # --------------------------------------------------------
+    # Shooting Star
+    # --------------------------------------------------------
+
+    patterns["Shooting Star"] = (
+        (body <= safe_range * 0.35)
+        & (upper_shadow >= body * 1.5)
+        & (lower_shadow <= body * 0.75)
+    )
+
+    # --------------------------------------------------------
+    # Bullish Engulfing
+    # --------------------------------------------------------
+
+    patterns["Bullish Engulfing"] = (
+        bearish.shift(1)
+        & bullish
+        & (O <= C.shift(1))
+        & (C >= O.shift(1))
+    )
+
+    # --------------------------------------------------------
+    # Bearish Engulfing
+    # --------------------------------------------------------
+
+    patterns["Bearish Engulfing"] = (
+        bullish.shift(1)
+        & bearish
+        & (O >= C.shift(1))
+        & (C <= O.shift(1))
+    )
+
+    # --------------------------------------------------------
+    # Bullish Marubozu
+    # --------------------------------------------------------
+
+    patterns["Bullish Marubozu"] = (
+        bullish
+        & (body >= safe_range * 0.90)
+    )
+
+    # --------------------------------------------------------
+    # Bearish Marubozu
+    # --------------------------------------------------------
+
+    patterns["Bearish Marubozu"] = (
+        bearish
+        & (body >= safe_range * 0.90)
+    )
+
+    # --------------------------------------------------------
+    # Inside Bar
+    # --------------------------------------------------------
+
+    patterns["Inside Bar"] = (
+        (H < H.shift(1))
+        & (L > L.shift(1))
+    )
+
+    # --------------------------------------------------------
+    # Morning Star - simplified 3 candle structure
+    # --------------------------------------------------------
+
+    first_bear = bearish.shift(2)
+    second_small = (
+        body.shift(1)
+        <= safe_range.shift(1) * 0.35
+    )
+    third_bull = bullish
+
+    patterns["Morning Star"] = (
+        first_bear
+        & second_small
+        & third_bull
+        & (C >= (O.shift(2) + C.shift(2)) / 2)
+    )
+
+    # --------------------------------------------------------
+    # Evening Star
+    # --------------------------------------------------------
+
+    first_bull = bullish.shift(2)
+    third_bear = bearish
+
+    patterns["Evening Star"] = (
+        first_bull
+        & second_small
+        & third_bear
+        & (C <= (O.shift(2) + C.shift(2)) / 2)
+    )
+
+    # --------------------------------------------------------
+    # Three Line Strike
+    # --------------------------------------------------------
+
+    three_bull = (
+        bullish.shift(3)
+        & bullish.shift(2)
+        & bullish.shift(1)
+    )
+
+    three_bear = (
+        bearish.shift(3)
+        & bearish.shift(2)
+        & bearish.shift(1)
+    )
+
+    bullish_strike = (
+        three_bear
+        & bullish
+        & (C > O.shift(3))
+    )
+
+    bearish_strike = (
+        three_bull
+        & bearish
+        & (C < O.shift(3))
+    )
+
+    patterns["Three Line Strike"] = (
+        bullish_strike
+        | bearish_strike
+    )
+
+    return patterns
+
+
+# ============================================================
+# STRUCTURE PATTERNS
+# ============================================================
+
+def _detect_structure_patterns(data):
+
+    C = data["Close"]
+
+    result = {}
+
+    rolling_low = C.rolling(5).min()
+    rolling_high = C.rolling(5).max()
+
+    # V reversal approximation
+    result["V Reversal"] = (
+        (C.shift(2) > C.shift(1))
+        & (C > C.shift(1))
+        & (
+            C.shift(1)
+            <= C.shift(2)
+        )
+    )
+
+    # W pattern approximation
+    result["W Pattern"] = (
+        (C.shift(4) > C.shift(3))
+        & (C.shift(2) < C.shift(3))
+        & (C.shift(2) <= rolling_low.shift(2))
+        & (C > C.shift(2))
+    )
+
+    # M pattern approximation
+    result["M Pattern"] = (
+        (C.shift(4) < C.shift(3))
+        & (C.shift(2) > C.shift(3))
+        & (C.shift(2) >= rolling_high.shift(2))
+        & (C < C.shift(2))
+    )
+
+    return result
+
+
+# ============================================================
+# TREND
+# ============================================================
+
+def _calculate_trend(data):
+
+    close = data["Close"]
+
+    fast = close.rolling(20).mean()
+    slow = close.rolling(50).mean()
+
+    if len(close) < 50:
+        return "NEUTRAL"
+
+    if (
+        fast.iloc[-1] > slow.iloc[-1]
+        and close.iloc[-1] > fast.iloc[-1]
+    ):
+        return "BULLISH"
+
+    if (
+        fast.iloc[-1] < slow.iloc[-1]
+        and close.iloc[-1] < fast.iloc[-1]
+    ):
+        return "BEARISH"
+
+    return "SIDEWAYS"
+
+
+# ============================================================
+# VOLATILITY
+# ============================================================
+
+def _calculate_volatility(data):
+
+    returns = data["Close"].pct_change()
+
+    if returns.dropna().empty:
+        return "LOW"
+
+    volatility = float(
+        returns.std()
+    )
+
+    if volatility >= 0.03:
+        return "HIGH"
+
+    if volatility >= 0.015:
+        return "MEDIUM"
+
+    return "LOW"
+
+
+# ============================================================
+# PATTERN OUTPUT
+# ============================================================
+
+def _build_patterns(data):
+
+    candle_patterns = (
+        _detect_candlestick_patterns(data)
+    )
+
+    structure_patterns = (
+        _detect_structure_patterns(data)
+    )
+
+    all_patterns = {}
+
+    all_patterns.update(
+        candle_patterns
+    )
+
+    all_patterns.update(
+        structure_patterns
+    )
+
+    detected = []
+
+    for name, series in all_patterns.items():
+
+        if bool(series.iloc[-1]):
+            detected.append(name)
+
+    return detected, all_patterns
+
+
+# ============================================================
+# HISTORICAL PATTERN OCCURRENCES
+# ============================================================
+
+def _occurrence_indices(series):
+
+    if series is None:
+        return []
+
+    return list(
+        series[
+            series.fillna(False)
+        ].index
+    )
+
+
+# ============================================================
+# PROBABILITY ENGINE
+# ============================================================
+
+def _calculate_probabilities(
+    data,
+    pattern_series,
+):
+
+    occurrence_indices = (
+        _occurrence_indices(
+            pattern_series
+        )
+    )
+
+    if not occurrence_indices:
+        return {}
+
+    return forward_outcomes_all(
+        df=data,
+        occurrence_indices=occurrence_indices,
+    )
+
+
+# ============================================================
+# MAIN ANALYSIS API
+# ============================================================
+
+def analyze(
+    symbol,
+    timeframe,
+    period=None,
+):
+
+    if timeframe not in TIMEFRAMES:
+        raise ValueError(
+            f"Unsupported timeframe: {timeframe}"
+        )
+
+    data = _download_data(
+        symbol,
+        timeframe,
+        period,
+    )
+
+    detected_patterns, all_patterns = (
+        _build_patterns(data)
+    )
+
+    trend = _calculate_trend(
+        data
+    )
+
+    volatility = _calculate_volatility(
+        data
+    )
+
+    # --------------------------------------------------------
+    # Current pattern probabilities
+    # --------------------------------------------------------
+
+    probabilities = {}
+
+    for pattern_name in detected_patterns:
+
+        series = all_patterns.get(
+            pattern_name
+        )
+
+        if series is None:
             continue
 
-        future_position = position + bars_forward
-
-        # Not enough future data
-        if future_position >= len(df):
-            continue
-
-        start_price = close.iloc[position]
-        future_price = close.iloc[future_position]
-
-        if pd.isna(start_price):
-            continue
-
-        if pd.isna(future_price):
-            continue
-
-        if float(start_price) <= 0:
-            continue
-
-        # Percentage return
-        future_return = (
-            float(future_price) / float(start_price)
-        ) - 1.0
-
-        returns.append(future_return)
+        probabilities[
+            pattern_name
+        ] = _calculate_probabilities(
+            data,
+            series,
+        )
 
     # --------------------------------------------------------
-    # No usable historical samples
+    # Projection
     # --------------------------------------------------------
 
-    if not returns:
-        return None
-
-    values = np.asarray(
-        returns,
-        dtype=float,
+    last_price = float(
+        data["Close"].iloc[-1]
     )
+
+    recent_high = float(
+        data["High"].tail(20).max()
+    )
+
+    recent_low = float(
+        data["Low"].tail(20).min()
+    )
+
+    projection_direction = trend
+
+    projection = {
+        "direction": projection_direction,
+        "upper_zone": recent_high,
+        "lower_zone": recent_low,
+    }
 
     # --------------------------------------------------------
-    # Classification
-    # --------------------------------------------------------
-
-    bullish_probability = float(
-        (values >= bullish_threshold).mean()
-    )
-
-    bearish_probability = float(
-        (values <= bearish_threshold).mean()
-    )
-
-    sideways_probability = max(
-        0.0,
-        1.0
-        - bullish_probability
-        - bearish_probability,
-    )
-
-    # --------------------------------------------------------
-    # Additional statistics
-    # --------------------------------------------------------
-
-    positive_return_rate = float(
-        (values > 0).mean()
-    )
-
-    negative_return_rate = float(
-        (values < 0).mean()
-    )
-
-    win_rate = positive_return_rate
-
-    mean_return = float(
-        np.mean(values)
-    )
-
-    median_return = float(
-        np.median(values)
-    )
-
-    # --------------------------------------------------------
-    # Final result
+    # Final response
     # --------------------------------------------------------
 
     return {
-
-        "horizon": horizon,
-
-        "bars_forward": bars_forward,
-
-        "samples": int(
-            len(values)
-        ),
-
-        "bullish_probability": bullish_probability,
-
-        "bearish_probability": bearish_probability,
-
-        "sideways_probability": sideways_probability,
-
-        "mean_return": mean_return,
-
-        "median_return": median_return,
-
-        "win_rate": win_rate,
-
-        "positive_return_rate": positive_return_rate,
-
-        "negative_return_rate": negative_return_rate,
-    }
-
-
-# ============================================================
-# ALL HORIZONS CALCULATOR
-# ============================================================
-
-def forward_outcomes_all(
-    df: pd.DataFrame,
-    occurrence_indices,
-    horizons=None,
-):
-    """
-    Calculate historical outcomes for multiple horizons.
-
-    If horizons is None, every supported horizon is calculated.
-    """
-
-    if horizons is None:
-
-        selected_horizons = list(
-            HORIZON_BARS.keys()
-        )
-
-    else:
-
-        selected_horizons = list(
-            horizons
-        )
-
-    results = {}
-
-    for horizon in selected_horizons:
-
-        if horizon not in HORIZON_BARS:
-            continue
-
-        results[horizon] = forward_outcomes(
-            df=df,
-            occurrence_indices=occurrence_indices,
-            horizon=horizon,
-        )
-
-    return results
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "data": data,
+        "last_price": last_price,
+        "trend": trend,
+        "volatility": volatility,
+        "patterns": detected_patterns,
+        "probabilities": probabilities,
+        "projection": projection,
+        }
