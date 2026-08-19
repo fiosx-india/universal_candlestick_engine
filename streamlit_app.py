@@ -85,21 +85,45 @@ with st.sidebar:
                 from data.angel_one import (
                     AngelOneDataClient
                 )
-
+                
                 import os
+
+
+                def get_secret(name):
+                    """
+                    Read credentials from Streamlit Secrets first,
+                    then fall back to environment variables.
+                    """
+
+                    try:
+                        value = st.secrets.get(name)
+
+                        if value:
+                            return str(value).strip()
+
+                    except Exception:
+                        pass
+
+                    value = os.getenv(name)
+
+                    if value:
+                        return str(value).strip()
+
+                    return ""
+
 
                 client = (
                     AngelOneDataClient(
-                        api_key=os.getenv(
+                        api_key=get_secret(
                             "ANGEL_API_KEY"
                         ),
-                        client_code=os.getenv(
+                        client_code=get_secret(
                             "ANGEL_CLIENT_CODE"
                         ),
-                        mpin=os.getenv(
+                        mpin=get_secret(
                             "ANGEL_MPIN"
                         ),
-                        totp_secret=os.getenv(
+                        totp_secret=get_secret(
                             "ANGEL_TOTP_SECRET"
                         ),
                     )
