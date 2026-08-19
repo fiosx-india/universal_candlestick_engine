@@ -1,22 +1,30 @@
 import streamlit as st
 
-
 def pattern_table(patterns):
-    rows = [
-        {
-            "Pattern": p.name,
-            "Direction": p.direction,
-            "State": p.state,
-            "Confidence": f"{p.confidence:.0%}",
-        }
-        for p in patterns
-    ]
+    rows = []
+
+    for p in patterns:
+        if isinstance(p, dict):
+            confidence = float(p.get("confidence", 0.0))
+
+            rows.append({
+                "Pattern": p.get("name", ""),
+                "Direction": p.get("direction", ""),
+                "State": p.get("state", ""),
+                "Confidence": f"{confidence:.0%}",
+            })
+        else:
+            rows.append({
+                "Pattern": p.name,
+                "Direction": p.direction,
+                "State": p.state,
+                "Confidence": f"{p.confidence:.0%}",
+            })
 
     st.dataframe(
         rows,
         width="stretch",
     )
-
 
 def probability_cards(p):
     """
