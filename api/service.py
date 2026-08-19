@@ -1435,26 +1435,164 @@ def analyze(
     )
 
     # --------------------------------------------------------
-    # Current pattern probabilities
+    # Direction probability
+    # --------------------------------------------------------
+    #
+    # UI contract:
+    #   bullish
+    #   bearish
+    #   sideways
+    #
+    # Historical pattern outcomes are used when a qualifying
+    # current pattern exists.
+    # If no qualifying pattern exists, use a conservative
+    # trend-based distribution rather than displaying
+    # misleading 0% / 0% / 0%.
     # --------------------------------------------------------
 
-    probabilities = {}
+    probabilities = {
+        "bullish": 0.0,
+        "bearish": 0.0,
+        "sideways": 0.0,
+    }
+
+    historical_samples = 0
+
+    # --------------------------------------------------------
+    # Aggregate historical evidence from detected patterns
+    # --------------------------------------------------------
 
     for pattern_name in detected_patterns:
 
-        series = all_patterns.get(
-            pattern_name
-        )
+        series = all_patterns.get(pattern_name)
 
         if series is None:
             continue
 
-        probabilities[
-            pattern_name
-        ] = _calculate_probabilities(
+        outcome = _calculate_probabilities(
             data,
             series,
         )
+
+        if not outcome:
+            continue
+
+        for horizon_result in outcome.values():
+
+            if not horizon_result:
+                continue
+
+            samples = int(
+                horizon_result.get(
+                    "samples",
+                    0,
+                )
+            )
+
+            if samples <= 0:
+                continue
+
+            historical_samples += samples
+
+            probabilities["bullish"] += (
+                float(
+                    horizon_result.get(
+                        "bullish_probability",
+                        0.0,
+                    )
+                )
+                * samples
+            )
+
+            probabilities["bearish"] += (
+                float(
+                    horizon_result.get(
+                        "bearish_probability",
+                        0.0,
+                    )
+                )
+                * samples
+            )
+
+            probabilities["sideways"] += (
+                float(
+                    horizon_result.get(
+                        "sideways_probability",
+                        0.0,
+                    )
+                )
+                * samples
+            )
+
+
+    # --------------------------------------------------------
+    # Normalize historical evidence
+    # --------------------------------------------------------
+
+    if historical_samples > 0:
+
+        probabilities = {
+            key: value / historical_samples
+            for key, value in probabilities.items()
+        }
+
+    else:
+
+        # ----------------------------------------------------
+        # No qualifying historical pattern evidence.
+        #
+        # Do NOT report false 0% probabilities.
+        # Use a conservative distribution based on current
+        # trend state only.
+        # ----------------------------------------------------
+
+        if trend == "BULLISH":
+
+            probabilities = {
+                "bullish": 0.60,
+                "bearish": 0.15,
+                "sideways": 0.25,
+            }
+
+        elif trend == "BEARISH":
+
+            probabilities = {
+                "bullish": 0.15,
+                "bearish": 0.60,
+                "sideways": 0.25,
+            }
+
+        else:
+
+            probabilities = {
+                "bullish": 0.25,
+                "bearish": 0.25,
+                "sideways": 0.50,
+            }
+
+
+    # --------------------------------------------------------
+    # Final normalization
+    # --------------------------------------------------------
+
+    total_probability = sum(
+        probabilities.values()
+    )
+
+    if total_probability <= 0:
+
+        probabilities = {
+            "bullish": 1.0 / 3.0,
+            "bearish": 1.0 / 3.0,
+            "sideways": 1.0 / 3.0,
+        }
+
+    else:
+
+        probabilities = {
+            key: value / total_probability
+            for key, value in probabilities.items()
+            }
 
     # --------------------------------------------------------
     # Projection
