@@ -1,17 +1,42 @@
 import streamlit as st
+
 from app.charts import candlestick_chart
-from app.components import pattern_table, probability_cards
+from app.components import (
+    pattern_table,
+    probability_cards,
+)
+
 from api.service import analyze
 from constants import TIMEFRAMES
 
-st.set_page_config(page_title="Universal Candlestick Engine", page_icon="🕯️", layout="wide")
 
-st.title("🕯️ Universal Candlestick Engine")
-st.caption("Multi-timeframe candlestick & chart-pattern intelligence — probability, not certainty.")
+st.set_page_config(
+    page_title="Universal Candlestick Engine",
+    page_icon="🕯️",
+    layout="wide",
+)
+
+
+st.title(
+    "🕯️ Universal Candlestick Engine"
+)
+
+st.caption(
+    "Multi-timeframe candlestick & "
+    "chart-pattern intelligence — "
+    "probability, not certainty."
+)
+
+
+# ============================================================
+# MARKET INPUT
+# ============================================================
 
 with st.sidebar:
 
-    st.header("Market Input")
+    st.header(
+        "Market Input"
+    )
 
     exchange = st.selectbox(
         "Exchange",
@@ -28,49 +53,79 @@ with st.sidebar:
 
     search_query = st.text_input(
         "Search Instrument",
-        placeholder="RELIANCE / TCS / GOLD / CRUDEOIL",
+        placeholder=(
+            "RELIANCE / TCS / "
+            "GOLD / CRUDEOIL"
+        ),
     ).strip().upper()
 
     search_button = st.button(
         "Search Instrument",
         type="secondary",
-        width="stretch",
+        use_container_width=True,
     )
 
+
     # --------------------------------------------------------
-    # Angel One instrument search
+    # SEARCH
     # --------------------------------------------------------
 
     if search_button:
 
         if not search_query:
-            st.warning("Enter an instrument name.")
-            st.stop()
 
-        try:
-
-            # Uses the existing Angel One authentication.
-            registry_client = AngelOneDataClient(
-                symbol="NIFTY",
-                exchange=exchange,
+            st.warning(
+                "Enter an instrument name."
             )
 
-            search_results = registry_client.search_instruments(
-                exchange=exchange,
-                query=search_query,
-                limit=50,
-            )
+        else:
 
-            st.session_state["instrument_results"] = search_results
-            st.session_state["instrument_exchange"] = exchange
+            try:
 
-        except Exception as exc:
+                from data.angel_one import (
+                    AngelOneDataClient
+                )
 
-            st.error(
-                f"Instrument search failed: {exc}"
-            )
+                import os
 
-            st.session_state["instrument_results"] = []
+                client = (
+                    AngelOneDataClient(
+                        api_key=os.getenv(
+                            "ANGEL_API_KEY"
+                        ),
+                        client_code=os.getenv(
+                            "ANGEL_CLIENT_CODE"
+                        ),
+                        mpin=os.getenv(
+                            "ANGEL_MPIN"
+                        ),
+                        totp_secret=os.getenv(
+                            "ANGEL_TOTP_SECRET"
+                        ),
+                    )
+                )
+
+                results = (
+                    client.search_instruments(
+                        exchange=exchange,
+                        query=search_query,
+                        limit=50,
+                    )
+                )
+
+                st.session_state[
+                    "instrument_results"
+                ] = results
+
+            except Exception as exc:
+
+                st.error(
+                    f"Instrument search failed: {exc}"
+                )
+
+                st.session_state[
+                    "instrument_results"
+                ] = []
 
 
     results = st.session_state.get(
@@ -78,81 +133,257 @@ with st.sidebar:
         [],
     )
 
+
+    # --------------------------------------------------------
+    # SELECT RESULT
+    # --------------------------------------------------------
+
     if results:
 
-        labels = []
-
-        for item in results:
-
-            labels.append(
+        labels = [
+            (
                 f"{item['tradingsymbol']} "
                 f"• {item['exchange']} "
-                f"• Token {item['symboltoken']}"
+                f"• Token "
+                f"{item['symboltoken']}"
             )
+            for item in results
+        ]
 
         selected_index = st.selectbox(
             "Select Instrument",
-            range(len(results)),
+            range(
+                len(results)
+            ),
             format_func=lambda i: labels[i],
         )
 
-        selected_instrument = results[selected_index]
+        selected = results[
+            selected_index
+        ]
 
-        st.session_state["selected_instrument"] = (
-            selected_instrument
-        )
+        st.session_state[
+            "selected_instrument"
+        ] = selected
 
         st.success(
-            f"Selected: "
-            f"{selected_instrument['tradingsymbol']}"
+            "Selected: "
+            f"{selected['tradingsymbol']}"
         )
 
+
+    # --------------------------------------------------------
+    # TIMEFRAME
+    # --------------------------------------------------------
 
     timeframe = st.selectbox(
         "Timeframe",
         TIMEFRAMES,
-        index=TIMEFRAMES.index("1D"),
+        index=TIMEFRAMES.index(
+            "1D"
+        ),
     )
+
+
+    # --------------------------------------------------------
+    # HISTORICAL PERIOD
+    # --------------------------------------------------------
 
     period = st.selectbox(
         "Historical data",
-        ["60d", "1y", "2y", "5y"],
+        [
+            "60d",
+            "1y",
+            "2y",
+            "5y",
+        ],
         index=2,
     )
+
 
     analyze_now = st.button(
         "Analyze Market",
         type="primary",
-        width="stretch",
+        use_container_width=True,
     )
 
-if analyze_now or "result" not in st.session_state:
-    try:
-        with st.spinner("Loading market data and scanning patterns..."):
-            st.session_state.result=analyze(symbol,timeframe,period)
-    except Exception as e:
-        st.error(f"Analysis failed: {e}")
+
+# ============================================================
+# SELECTED INSTRUMENT
+# ============================================================
+
+selected_instrument = (
+    st.session_state.get(
+        "selected_instrument"
+    )
+)
+
+
+# ============================================================
+# ANALYSIS
+# ============================================================
+
+if analyze_now:
+
+    if not selected_instrument:
+
+        st.warning(
+            "Search and select an instrument first."
+        )
+
         st.stop()
 
-r=st.session_state.result
-c1,c2,c3,c4=st.columns(4)
-c1.metric("Symbol",r["symbol"])
-c2.metric("Last Price",f"{r['last_price']:,.2f}")
-c3.metric("Trend",r["trend"])
-c4.metric("Volatility",r["volatility"])
 
-st.subheader("Market Chart")
-st.plotly_chart(candlestick_chart(r["data"].tail(300),f"{r['symbol']} — {r['timeframe']}"),use_container_width=True)
+    # Angel One trading symbol is the
+    # canonical symbol used by analysis.
 
-st.subheader("Probability")
-probability_cards(r["probabilities"])
+    symbol = selected_instrument[
+        "tradingsymbol"
+    ]
 
-st.subheader("Detected Patterns")
+
+    try:
+
+        with st.spinner(
+            "Loading market data and "
+            "scanning patterns..."
+        ):
+
+            result = analyze(
+                symbol,
+                timeframe,
+                period,
+            )
+
+            st.session_state[
+                "result"
+            ] = result
+
+    except Exception as exc:
+
+        st.error(
+            f"Analysis failed: {exc}"
+        )
+
+        st.stop()
+
+
+# ============================================================
+# RESULT
+# ============================================================
+
+if "result" not in st.session_state:
+
+    st.info(
+        "Search an instrument and "
+        "click Analyze Market."
+    )
+
+    st.stop()
+
+
+r = st.session_state[
+    "result"
+]
+
+
+# ============================================================
+# SUMMARY
+# ============================================================
+
+c1, c2, c3, c4 = st.columns(4)
+
+
+c1.metric(
+    "Symbol",
+    r["symbol"],
+)
+
+c2.metric(
+    "Last Price",
+    f"{r['last_price']:,.2f}",
+)
+
+c3.metric(
+    "Trend",
+    r["trend"],
+)
+
+c4.metric(
+    "Volatility",
+    r["volatility"],
+)
+
+
+# ============================================================
+# CHART
+# ============================================================
+
+st.subheader(
+    "Market Chart"
+)
+
+st.plotly_chart(
+    candlestick_chart(
+        r["data"].tail(300),
+        (
+            f"{r['symbol']} "
+            f"— {r['timeframe']}"
+        ),
+    ),
+    use_container_width=True,
+)
+
+
+# ============================================================
+# PROBABILITY
+# ============================================================
+
+st.subheader(
+    "Probability"
+)
+
+probability_cards(
+    r["probabilities"]
+)
+
+
+# ============================================================
+# PATTERNS
+# ============================================================
+
+st.subheader(
+    "Detected Patterns"
+)
+
 if r["patterns"]:
-    pattern_table(r["patterns"])
-else:
-    st.info("No qualifying patterns detected on the latest candle/structure window.")
 
-st.subheader("Projection")
-p=r["projection"]
-st.write(f"**Bias:** {p['direction']}  |  **Upper zone:** {p['upper_zone']:,.2f}  |  **Lower zone:** {p['lower_zone']:,.2f}")
+    pattern_table(
+        r["patterns"]
+    )
+
+else:
+
+    st.info(
+        "No qualifying patterns detected "
+        "on the latest candle/structure window."
+    )
+
+
+# ============================================================
+# PROJECTION
+# ============================================================
+
+st.subheader(
+    "Projection"
+)
+
+p = r["projection"]
+
+st.write(
+    f"**Bias:** {p['direction']}  |  "
+    f"**Upper zone:** "
+    f"{p['upper_zone']:,.2f}  |  "
+    f"**Lower zone:** "
+    f"{p['lower_zone']:,.2f}"
+)
