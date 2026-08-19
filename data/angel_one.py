@@ -667,6 +667,7 @@ class AngelOneDataClient:
         start: Optional[datetime] = None,
         end: Optional[datetime] = None,
         exchange: str = "NSE",
+        symboltoken: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Fetch historical OHLCV data.
