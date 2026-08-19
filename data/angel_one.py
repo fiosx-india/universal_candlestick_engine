@@ -196,14 +196,16 @@ class AngelOneDataClient:
         limit: int = 50,
     ):
         """
-        Search Angel One instruments using the existing
-        authenticated SmartConnect session.
+        Search instruments using the existing
+        authenticated SmartAPI session.
         """
+
+        self._ensure_login()
 
         from data.instrument_registry import search_instruments
 
         return search_instruments(
-            angel_client=self.client,
+            angel_client=self.smart_api,
             exchange=exchange,
             query=query,
             limit=limit,
@@ -215,14 +217,16 @@ class AngelOneDataClient:
         query: str,
     ):
         """
-        Resolve user-facing instrument name into the
-        exact Angel One trading symbol and token.
+        Resolve a user instrument to the exact
+        Angel One trading symbol and token.
         """
+
+        self._ensure_login()
 
         from data.instrument_registry import resolve_instrument
 
         return resolve_instrument(
-            angel_client=self.client,
+            angel_client=self.smart_api,
             exchange=exchange,
             query=query,
         )
