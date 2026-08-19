@@ -189,6 +189,45 @@ class AngelOneDataClient:
         self._instrument_master = None
         self._token_cache = {}
 
+    def search_instruments(
+        self,
+        exchange: str,
+        query: str,
+        limit: int = 50,
+    ):
+        """
+        Search Angel One instruments using the existing
+        authenticated SmartConnect session.
+        """
+
+        from data.instrument_registry import search_instruments
+
+        return search_instruments(
+            angel_client=self.client,
+            exchange=exchange,
+            query=query,
+            limit=limit,
+        )
+
+    def resolve_instrument(
+        self,
+        exchange: str,
+        query: str,
+    ):
+        """
+        Resolve user-facing instrument name into the
+        exact Angel One trading symbol and token.
+        """
+
+        from data.instrument_registry import resolve_instrument
+
+        return resolve_instrument(
+            angel_client=self.client,
+            exchange=exchange,
+            query=query,
+        )
+
+
     # ========================================================
     # LOGIN
     # ========================================================
