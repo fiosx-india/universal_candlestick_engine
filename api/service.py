@@ -595,18 +595,34 @@ def _download_angel_data(
         - timedelta(days=days)
     )
 
-    exchange = _resolve_exchange(
-        symbol
-    )
+    exchange = str(
+        exchange or ""
+    ).strip().upper()
 
-    angel_symbol = _resolve_angel_symbol(
+    angel_symbol = str(
         symbol
-    )
+    ).strip().upper()
+
+    symboltoken = str(
+        symboltoken or ""
+    ).strip()
+
+    if not exchange:
+        raise ValueError(
+            f"Missing exchange for {angel_symbol}"
+        )
+
+    if not symboltoken:
+        raise ValueError(
+            f"Missing symbol token for "
+            f"{exchange}:{angel_symbol}"
+        )
 
     client = _get_angel_client()
 
     data = client.get_historical_data(
         symbol=angel_symbol,
+        symboltoken=symboltoken,
         interval=native_interval,
         start=start,
         end=end,
@@ -673,6 +689,8 @@ def _download_data(
     symbol,
     timeframe,
     period=None,
+    exchange=None,
+    symboltoken=None,
 ):
     """
     Central market-data entry point.
@@ -693,6 +711,8 @@ def _download_data(
         symbol=symbol,
         timeframe=timeframe,
         period=period,
+        exchange=exchange,
+        symboltoken=symboltoken,
     )
 
     if data is None or data.empty:
@@ -1452,7 +1472,7 @@ def _calculate_probabilities(
 # ============================================================
 
 def analyze(
-    symbol,
+    instrument
     timeframe,
     period=None,
 ):
