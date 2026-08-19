@@ -412,6 +412,12 @@ def _aggregate_ohlcv(data, timeframe):
         return data
 
     # --------------------------------------------------------
+    # Validate timeframe
+    # --------------------------------------------------------
+
+    timeframe = str(timeframe).strip().upper()
+
+    # --------------------------------------------------------
     # Extract numeric multiplier
     # --------------------------------------------------------
 
@@ -427,31 +433,63 @@ def _aggregate_ohlcv(data, timeframe):
 
     unit = timeframe[len(number):]
 
+    # --------------------------------------------------------
     # Base timeframe needs no aggregation
-    if multiplier == 1:
-        return data
-
-    # --------------------------------------------------------
-    # Select base group size
     # --------------------------------------------------------
 
-    if unit == "H":
-        base_unit = "H"
-
-    elif unit == "D":
-        base_unit = "D"
-
-    elif unit == "W":
-        base_unit = "W"
-
-    elif unit == "M":
-        base_unit = "M"
-
-    else:
-        return data
+    if multiplier <= 1:
+        return data.copy()
 
     # --------------------------------------------------------
-    # OHLCV aggregation
+    # Validate supported timeframe units
+    # --------------------------------------------------------
+
+    if unit not in {"H", "D", "W", "M"}:
+        return data.copy()
+
+    # --------------------------------------------------------
+    # Work on a clean chronological copy
+    # --------------------------------------------------------
+
+    frame = data.copy()
+
+    frame = frame.sort_index()
+
+    # Remove duplicate timestamps
+    frame = frame[
+        ~frame.index.duplicated(
+            keep="last"
+        )
+    ]
+
+    if frame.empty:
+        return frame
+
+    # --------------------------------------------------------
+    # Required OHLC columns
+    # --------------------------------------------------------
+
+    required_columns = [
+        "Open",
+        "High",
+        "Low",
+        "Close",
+    ]
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in frame.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            f"Cannot aggregate {timeframe}. "
+            f"Missing columns: {missing_columns}"
+        )
+
+    # --------------------------------------------------------
+    # OHLCV aggregation rules
     # --------------------------------------------------------
 
     aggregation = {
@@ -461,52 +499,85 @@ def _aggregate_ohlcv(data, timeframe):
         "Close": "last",
     }
 
-    if "Adj Close" in data.columns:
+    if "Adj Close" in frame.columns:
         aggregation["Adj Close"] = "last"
 
-    if "Volume" in data.columns:
+    if "Volume" in frame.columns:
         aggregation["Volume"] = "sum"
 
     # --------------------------------------------------------
     # IMPORTANT:
     # Use sequential base candles.
     #
-    # This prevents multi-day/month grouping from depending
-    # on calendar boundaries and keeps the engine deterministic.
+    # This keeps multi-period aggregation deterministic.
     # --------------------------------------------------------
 
     group_id = (
-        np.arange(len(data))
+        np.arange(len(frame))
         // multiplier
     )
 
-    aggregated = (
-        data.groupby(group_id, sort=True)
-        .agg(aggregation)
+    grouped = frame.groupby(
+        group_id,
+        sort=True,
+        dropna=False,
+    )
+
+    aggregated = grouped.agg(
+        aggregation
     )
 
     # --------------------------------------------------------
-    # Preserve the timestamp of the final base candle
-    # in every aggregated candle.
+    # Preserve timestamp of final base candle
     # --------------------------------------------------------
 
-    last_indices = (
-        data.groupby(group_id, sort=True)
-        .apply(
-            lambda x: x.index[-1],
-            include_groups=False,
-        )
+    last_indices = grouped.apply(
+        lambda x: x.index[-1],
+        include_groups=False,
     )
 
     aggregated.index = pd.DatetimeIndex(
-        last_indices.values
+        last_indices.to_numpy()
     )
 
-    aggregated.index.name = data.index.name
+    aggregated.index.name = frame.index.name
 
-    return aggregated.dropna(
-        subset=["Open", "High", "Low", "Close"]
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Do not return an incomplete final candle.
+    #
+    # Example:
+    # 8H requires 8 base candles.
+    # If only 3 candles are available in the final group,
+    # that incomplete 8H candle must not be treated as a
+    # completed historical candle.
+    # --------------------------------------------------------
+
+    remainder = len(frame) % multiplier
+
+    if remainder != 0:
+        aggregated = aggregated.iloc[:-1]
+
+    # --------------------------------------------------------
+    # Remove invalid OHLC rows
+    # --------------------------------------------------------
+
+    aggregated = aggregated.dropna(
+        subset=[
+            "Open",
+            "High",
+            "Low",
+            "Close",
+        ]
     )
+
+    # --------------------------------------------------------
+    # Final chronological ordering
+    # --------------------------------------------------------
+
+    aggregated = aggregated.sort_index()
+
+    return aggregated
 
 # ============================================================
 # BASIC CANDLE CALCULATIONS
