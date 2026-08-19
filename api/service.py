@@ -143,6 +143,15 @@ def _download_data(symbol, timeframe, period=None):
         inplace=True,
     )
 
+    # ========================================================
+    # BUILD THE REQUESTED TIMEFRAME
+    # ========================================================
+
+    data = _aggregate_ohlcv(
+        data,
+        timeframe,
+    )
+
     if len(data) < 10:
         raise ValueError(
             "Not enough historical candles."
