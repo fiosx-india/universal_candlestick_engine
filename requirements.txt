@@ -4,3 +4,6 @@ numpy>=1.26
 yfinance>=0.2.40
 plotly>=5.20
 scipy>=1.11
+
+pyotp
+smartapi-python==1.5.5
