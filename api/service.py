@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import yfinance as yf
+import random
+import time
 
 from constants import TIMEFRAMES, PATTERN_GROUPS
 from historical.outcomes import forward_outcomes_all
@@ -296,6 +298,63 @@ TIMEFRAME_SETTINGS = {
     },
 }
 
+
+# ============================================================
+# SAFE MARKET DATA DOWNLOAD
+# ============================================================
+
+def _safe_yf_download(
+    ticker,
+    period,
+    interval,
+    max_retries=3,
+):
+    """
+    Safely download market data from Yahoo Finance.
+
+    Handles temporary rate limits and transient download
+    failures without crashing the Streamlit application.
+    """
+
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            data = yf.download(
+                ticker,
+                period=period,
+                interval=interval,
+                progress=False,
+                auto_adjust=False,
+                threads=False,
+            )
+
+            if data is not None and not data.empty:
+                return data
+
+        except Exception as exc:
+            last_error = exc
+
+        # Exponential backoff with small jitter.
+        if attempt < max_retries - 1:
+            delay = (
+                2 ** attempt
+                + random.uniform(0.5, 1.5)
+            )
+            time.sleep(delay)
+
+    if last_error is not None:
+        raise RuntimeError(
+            f"Unable to download market data for "
+            f"{ticker} ({interval}) after "
+            f"{max_retries} attempts: {last_error}"
+        )
+
+    raise RuntimeError(
+        f"No market data returned for "
+        f"{ticker} ({interval}) after "
+        f"{max_retries} attempts."
+    )
 
 # ============================================================
 # DATA LOADER
