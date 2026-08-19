@@ -387,27 +387,71 @@ def _get_angel_client():
 
     return _ANGEL_CLIENT
 
-
 # ============================================================
 # SYMBOL / EXCHANGE RESOLUTION
 # ============================================================
 
+# Known index symbols
+INDEX_EXCHANGE_MAP = {
+    "NIFTY": "NSE",
+    "NIFTY50": "NSE",
+    "BANKNIFTY": "NSE",
+    "FINNIFTY": "NSE",
+    "MIDCPNIFTY": "NSE",
+
+    "SENSEX": "BSE",
+    "BANKEX": "BSE",
+}
+
+# Known commodity symbols
+COMMODITY_EXCHANGE_MAP = {
+    "GOLD": "MCX",
+    "GOLDM": "MCX",
+    "SILVER": "MCX",
+    "SILVERM": "MCX",
+    "CRUDEOIL": "MCX",
+    "CRUDEOILM": "MCX",
+    "NATURALGAS": "MCX",
+    "NATURALGASM": "MCX",
+    "COPPER": "MCX",
+    "ZINC": "MCX",
+    "ALUMINIUM": "MCX",
+    "LEAD": "MCX",
+    "NICKEL": "MCX",
+}
+
+
 def _resolve_exchange(symbol):
     """
-    Resolve common user-facing symbols.
+    Resolve the correct Angel One exchange segment.
 
-    RELIANCE.NS -> NSE
-    TCS.NS      -> NSE
-    RELIANCE.BO -> BSE
-
-    Plain equity symbols default to NSE.
+    Examples:
+        RELIANCE.NS -> NSE
+        RELIANCE.BO -> BSE
+        NIFTY       -> NSE
+        SENSEX      -> BSE
+        GOLD        -> MCX
+        CRUDEOIL    -> MCX
     """
 
     value = str(symbol).strip().upper()
 
+    # Explicit Yahoo-style suffixes
+    if value.endswith(".NS"):
+        return "NSE"
+
     if value.endswith(".BO"):
         return "BSE"
 
+    # Known indices
+    if value in INDEX_EXCHANGE_MAP:
+        return INDEX_EXCHANGE_MAP[value]
+
+    # Known commodities
+    if value in COMMODITY_EXCHANGE_MAP:
+        return COMMODITY_EXCHANGE_MAP[value]
+
+    # Normal equity default
     return "NSE"
 
 
