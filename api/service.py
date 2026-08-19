@@ -678,24 +678,6 @@ def _download_data(
 
     return data
     
-# ============================================================
-# DATA LOADER
-# ============================================================
-
-def _download_data(symbol, timeframe, period=None):
-
-    if timeframe not in TIMEFRAME_SETTINGS:
-        raise ValueError(
-            f"Unsupported timeframe: {timeframe}"
-        )
-
-    settings = TIMEFRAME_SETTINGS[timeframe]
-
-    selected_period = (
-        period
-        if period is not None
-        else settings["period"]
-    )
 
     # --------------------------------------------------------
     # IMPORTANT:
