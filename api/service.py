@@ -320,13 +320,10 @@ def _safe_yf_download(
 
     for attempt in range(max_retries):
         try:
-            data = yf.download(
-                ticker,
-                period=period,
-                interval=interval,
-                progress=False,
-                auto_adjust=False,
-                threads=False,
+            data = _safe_yf_download(
+                ticker=symbol,
+                period=selected_period,
+                interval=settings["interval"],
             )
 
             if data is not None and not data.empty:
