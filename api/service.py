@@ -11,158 +11,64 @@ from historical.outcomes import forward_outcomes_all
 # ============================================================
 
 TIMEFRAME_SETTINGS = {
-    "1m": {
-        "interval": "1m",
-        "period": "7d",
-    },
-    "5m": {
-        "interval": "5m",
-        "period": "60d",
-    },
-    "15m": {
-        "interval": "15m",
-        "period": "60d",
-    },
-    "30m": {
-        "interval": "30m",
-        "period": "60d",
-    },
-    "45m": {
-        "interval": "45m",
-        "period": "60d",
-    },
-    "1H": {
-        "interval": "1h",
-        "period": "2y",
-    },
-    "2H": {
-        "interval": "1h",
-        "period": "2y",
-    },
-    "3H": {
-        "interval": "1h",
-        "period": "2y",
-    },
-    "4H": {
-        "interval": "1h",
-        "period": "2y",
-    },
-    "5H": {
-        "interval": "1h",
-        "period": "2y",
-    },
-    "6H": {
-        "interval": "1h",
-        "period": "2y",
-    },
-    "7H": {
-        "interval": "1h",
-        "period": "2y",
-    },
-    "8H": {
-        "interval": "1h",
-        "period": "2y",
-    },
-    "1D": {
-        "interval": "1d",
-        "period": "5y",
-    },
-    "2D": {
-        "interval": "1d",
-        "period": "5y",
-    },
-    "3D": {
-        "interval": "1d",
-        "period": "5y",
-    },
-    "4D": {
-        "interval": "1d",
-        "period": "5y",
-    },
-    "5D": {
-        "interval": "1d",
-        "period": "5y",
-    },
-    "6D": {
-        "interval": "1d",
-        "period": "5y",
-    },
-    "7D": {
-        "interval": "1d",
-        "period": "5y",
-    },
-    "10D": {
-        "interval": "1d",
-        "period": "5y",
-    },
-    "15D": {
-        "interval": "1d",
-        "period": "5y",
-    },
-    "1W": {
-        "interval": "1wk",
-        "period": "10y",
-    },
-    "2W": {
-        "interval": "1wk",
-        "period": "10y",
-    },
-    "3W": {
-        "interval": "1wk",
-        "period": "10y",
-    },
-    "4W": {
-        "interval": "1wk",
-        "period": "10y",
-    },
-    "1M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "2M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "3M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "4M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "5M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "6M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "7M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "8M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "9M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "10M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "11M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
-    "12M": {
-        "interval": "1mo",
-        "period": "10y",
-    },
+    "1m": {"interval": "1m", "period": "7d"},
+    "5m": {"interval": "5m", "period": "60d"},
+    "15m": {"interval": "15m", "period": "60d"},
+    "30m": {"interval": "30m", "period": "60d"},
+    "45m": {"interval": "45m", "period": "60d"},
+
+    # --------------------------------------------------------
+    # Hourly base data
+    # 2H-8H will be aggregated from 1H candles
+    # --------------------------------------------------------
+    "1H": {"interval": "1h", "period": "2y"},
+    "2H": {"interval": "1h", "period": "2y"},
+    "3H": {"interval": "1h", "period": "2y"},
+    "4H": {"interval": "1h", "period": "2y"},
+    "5H": {"interval": "1h", "period": "2y"},
+    "6H": {"interval": "1h", "period": "2y"},
+    "7H": {"interval": "1h", "period": "2y"},
+    "8H": {"interval": "1h", "period": "2y"},
+
+    # --------------------------------------------------------
+    # Daily base data
+    # 2D-15D will be aggregated from 1D candles
+    # --------------------------------------------------------
+    "1D": {"interval": "1d", "period": "5y"},
+    "2D": {"interval": "1d", "period": "5y"},
+    "3D": {"interval": "1d", "period": "5y"},
+    "4D": {"interval": "1d", "period": "5y"},
+    "5D": {"interval": "1d", "period": "5y"},
+    "6D": {"interval": "1d", "period": "5y"},
+    "7D": {"interval": "1d", "period": "5y"},
+    "10D": {"interval": "1d", "period": "5y"},
+    "15D": {"interval": "1d", "period": "5y"},
+
+    # --------------------------------------------------------
+    # Weekly base data
+    # 2W-4W will be aggregated from 1W candles
+    # --------------------------------------------------------
+    "1W": {"interval": "1wk", "period": "10y"},
+    "2W": {"interval": "1wk", "period": "10y"},
+    "3W": {"interval": "1wk", "period": "10y"},
+    "4W": {"interval": "1wk", "period": "10y"},
+
+    # --------------------------------------------------------
+    # Monthly base data
+    # 2M-12M will be aggregated from 1M candles
+    # --------------------------------------------------------
+    "1M": {"interval": "1mo", "period": "10y"},
+    "2M": {"interval": "1mo", "period": "10y"},
+    "3M": {"interval": "1mo", "period": "10y"},
+    "4M": {"interval": "1mo", "period": "10y"},
+    "5M": {"interval": "1mo", "period": "10y"},
+    "6M": {"interval": "1mo", "period": "10y"},
+    "7M": {"interval": "1mo", "period": "10y"},
+    "8M": {"interval": "1mo", "period": "10y"},
+    "9M": {"interval": "1mo", "period": "10y"},
+    "10M": {"interval": "1mo", "period": "10y"},
+    "11M": {"interval": "1mo", "period": "10y"},
+    "12M": {"interval": "1mo", "period": "10y"},
 }
 
 
@@ -244,6 +150,129 @@ def _download_data(symbol, timeframe, period=None):
 
     return data
 
+# ============================================================
+# OHLCV TIMEFRAME AGGREGATION ENGINE
+# ============================================================
+
+def _aggregate_ohlcv(data, timeframe):
+    """
+    Convert base candles into the requested timeframe.
+
+    Examples:
+        1H  -> original 1H candles
+        2H  -> 2 x 1H candles
+        8H  -> 8 x 1H candles
+
+        1D  -> original daily candles
+        2D  -> 2 x daily candles
+        15D -> 15 x daily candles
+
+        1W  -> original weekly candles
+        4W  -> 4 x weekly candles
+
+        1M  -> original monthly candles
+        12M -> 12 x monthly candles
+    """
+
+    if data is None or data.empty:
+        return data
+
+    # --------------------------------------------------------
+    # Extract numeric multiplier
+    # --------------------------------------------------------
+
+    number = ""
+
+    for char in timeframe:
+        if char.isdigit():
+            number += char
+        else:
+            break
+
+    multiplier = int(number) if number else 1
+
+    unit = timeframe[len(number):]
+
+    # Base timeframe needs no aggregation
+    if multiplier == 1:
+        return data
+
+    # --------------------------------------------------------
+    # Select base group size
+    # --------------------------------------------------------
+
+    if unit == "H":
+        base_unit = "H"
+
+    elif unit == "D":
+        base_unit = "D"
+
+    elif unit == "W":
+        base_unit = "W"
+
+    elif unit == "M":
+        base_unit = "M"
+
+    else:
+        return data
+
+    # --------------------------------------------------------
+    # OHLCV aggregation
+    # --------------------------------------------------------
+
+    aggregation = {
+        "Open": "first",
+        "High": "max",
+        "Low": "min",
+        "Close": "last",
+    }
+
+    if "Adj Close" in data.columns:
+        aggregation["Adj Close"] = "last"
+
+    if "Volume" in data.columns:
+        aggregation["Volume"] = "sum"
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Use sequential base candles.
+    #
+    # This prevents multi-day/month grouping from depending
+    # on calendar boundaries and keeps the engine deterministic.
+    # --------------------------------------------------------
+
+    group_id = (
+        np.arange(len(data))
+        // multiplier
+    )
+
+    aggregated = (
+        data.groupby(group_id, sort=True)
+        .agg(aggregation)
+    )
+
+    # --------------------------------------------------------
+    # Preserve the timestamp of the final base candle
+    # in every aggregated candle.
+    # --------------------------------------------------------
+
+    last_indices = (
+        data.groupby(group_id, sort=True)
+        .apply(
+            lambda x: x.index[-1],
+            include_groups=False,
+        )
+    )
+
+    aggregated.index = pd.DatetimeIndex(
+        last_indices.values
+    )
+
+    aggregated.index.name = data.index.name
+
+    return aggregated.dropna(
+        subset=["Open", "High", "Low", "Close"]
+    )
 
 # ============================================================
 # BASIC CANDLE CALCULATIONS
