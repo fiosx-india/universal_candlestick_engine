@@ -10,10 +10,121 @@ st.title("🕯️ Universal Candlestick Engine")
 st.caption("Multi-timeframe candlestick & chart-pattern intelligence — probability, not certainty.")
 
 with st.sidebar:
-    symbol=st.text_input("Symbol","RELIANCE.NS")
-    timeframe=st.selectbox("Timeframe",TIMEFRAMES,index=TIMEFRAMES.index("1D"))
-    period=st.selectbox("Data period",["60d","1y","2y","5y"],index=2)
-    run=st.button("Analyze",type="primary",use_container_width=True)
+
+    st.header("Market Input")
+
+    exchange = st.selectbox(
+        "Exchange",
+        [
+            "NSE",
+            "BSE",
+            "MCX",
+            "NFO",
+            "BFO",
+            "CDS",
+        ],
+        index=0,
+    )
+
+    search_query = st.text_input(
+        "Search Instrument",
+        placeholder="RELIANCE / TCS / GOLD / CRUDEOIL",
+    ).strip().upper()
+
+    search_button = st.button(
+        "Search Instrument",
+        type="secondary",
+        width="stretch",
+    )
+
+    # --------------------------------------------------------
+    # Angel One instrument search
+    # --------------------------------------------------------
+
+    if search_button:
+
+        if not search_query:
+            st.warning("Enter an instrument name.")
+            st.stop()
+
+        try:
+
+            # Uses the existing Angel One authentication.
+            registry_client = AngelOneDataClient(
+                symbol="NIFTY",
+                exchange=exchange,
+            )
+
+            search_results = registry_client.search_instruments(
+                exchange=exchange,
+                query=search_query,
+                limit=50,
+            )
+
+            st.session_state["instrument_results"] = search_results
+            st.session_state["instrument_exchange"] = exchange
+
+        except Exception as exc:
+
+            st.error(
+                f"Instrument search failed: {exc}"
+            )
+
+            st.session_state["instrument_results"] = []
+
+
+    results = st.session_state.get(
+        "instrument_results",
+        [],
+    )
+
+    if results:
+
+        labels = []
+
+        for item in results:
+
+            labels.append(
+                f"{item['tradingsymbol']} "
+                f"• {item['exchange']} "
+                f"• Token {item['symboltoken']}"
+            )
+
+        selected_index = st.selectbox(
+            "Select Instrument",
+            range(len(results)),
+            format_func=lambda i: labels[i],
+        )
+
+        selected_instrument = results[selected_index]
+
+        st.session_state["selected_instrument"] = (
+            selected_instrument
+        )
+
+        st.success(
+            f"Selected: "
+            f"{selected_instrument['tradingsymbol']}"
+        )
+
+
+    timeframe = st.selectbox(
+        "Timeframe",
+        TIMEFRAMES,
+        index=TIMEFRAMES.index("1D"),
+    )
+
+    period = st.selectbox(
+        "Historical data",
+        ["60d", "1y", "2y", "5y"],
+        index=2,
+    )
+
+    analyze_now = st.button(
+        "Analyze Market",
+        type="primary",
+        width="stretch",
+    )
 
 if run or "result" not in st.session_state:
     try:
