@@ -126,7 +126,7 @@ with st.sidebar:
         width="stretch",
     )
 
-if run or "result" not in st.session_state:
+if analyze_now or "result" not in st.session_state:
     try:
         with st.spinner("Loading market data and scanning patterns..."):
             st.session_state.result=analyze(symbol,timeframe,period)
