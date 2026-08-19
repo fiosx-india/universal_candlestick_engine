@@ -519,6 +519,8 @@ def _download_angel_data(
     symbol,
     timeframe,
     period=None,
+    exchange=None,
+    symboltoken=None,
 ):
     """
     Download normalized OHLCV data from Angel One.
