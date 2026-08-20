@@ -1,0 +1,141 @@
+UNIVERSAL CANDLESTICK ENGINE — ZIP AUDIT
+===============================================
+
+Source:
+    universal_candlestick_engine-main (2).zip
+
+Audit result:
+    Python syntax: PASS
+    Current main Streamlit -> api.service -> Angel One path: WORKING
+    Critical timeframe normalization issue: FOUND
+    Historical probability aggregation issue: FOUND
+    Projection was recent-range based rather than ATR-based: FOUND
+    Legacy Yahoo provider remains in an unused/orphan path: FOUND
+    Duplicate instrument_registry_FINAL.py exists and is unused: FOUND
+
+CRITICAL FINDINGS
+-----------------
+
+1) Minute/month collision
+   api/service.py converted every timeframe to .upper().
+   Therefore:
+       1m  -> 1M
+       5m  -> 5M
+       45m -> 45M
+   while the configuration defines minutes with lowercase m and
+   months with uppercase M.
+
+   This makes the minute timeframes unsafe and can reinterpret 1m as
+   monthly 1M.
+
+2) 45m aggregation multiplier was not being honored correctly
+   45m downloads 15m candles and the configuration says multiplier=3.
+   The old generic aggregator derived the multiplier from the string
+   "45m", which could produce a 45-candle grouping instead of 3 x 15m.
+
+3) Historical probability double-counting / horizon mixing
+   historical/outcomes.py calculates many horizons (1H through 12M).
+   api/service.py then blended every horizon into one displayed
+   probability. The same historical pattern occurrence therefore
+   contributed repeatedly at different horizons.
+
+   The fixed service uses ONE clearly defined horizon:
+       the next completed bar of the selected analysis timeframe.
+
+4) Hard-coded probability fallbacks
+   Old service fallback:
+       bullish 60%, bearish 15%, sideways 25%
+   or:
+       bullish 25%, bearish 25%, sideways 50%
+
+   Those numbers were not historical probabilities. They were fixed
+   priors. The fixed service uses a neutral prior plus trend/pattern
+   evidence and historical next-bar evidence when available.
+
+5) Projection was not a forecast zone
+   Old projection used the highest high and lowest low of the last
+   20 candles. That is a recent range, not a volatility-based
+   projection.
+
+   The fixed service uses ATR-based reference zones and keeps the
+   direction as an evidence estimate.
+
+6) Duplicate/orphan architecture
+   data/provider.py still contains a Yahoo Finance provider.
+   timeframe/engine.py uses that Yahoo provider, but the current main
+   Streamlit application does NOT call timeframe/engine.py. The live
+   path is api/service.py -> data/angel_one.py.
+
+   Therefore I did NOT silently delete the legacy provider. It is
+   isolated from the current live path and should be removed or
+   migrated separately if the whole repository must become
+   Angel-One-only.
+
+7) Duplicate instrument registry
+   Both exist:
+       data/instrument_registry.py
+       data/instrument_registry_FINAL.py
+   The live AngelOneDataClient imports instrument_registry.py.
+   instrument_registry_FINAL.py is currently unused.
+
+WHAT WAS FIXED
+---------------
+
+A) api/service.py
+   - Added case-safe canonical timeframe normalization.
+   - Preserved minute 'm' versus month 'M'.
+   - Corrected 45m = 3 x 15m aggregation.
+   - Preserved exact Angel One instrument + token path.
+   - Removed all-horizon probability blending.
+   - Added next-bar historical evidence.
+   - Added evidence-weighted probability estimate.
+   - Added ATR-based projection zone.
+   - Added backward compatibility for symbol-string callers.
+   - Added confluence and historical_evidence fields without breaking
+     the current Streamlit UI.
+
+B) timeframe/registry.py
+   - Fixed the same m/M normalization problem for the reusable
+     timeframe layer.
+   - Added safe normalization for 1h/1d/1w/1mo aliases.
+
+WHAT WAS NOT CHANGED
+--------------------
+
+- data/angel_one.py
+- data/instrument_registry.py
+- pattern definitions
+- Streamlit layout
+- existing UI component API
+- legacy Yahoo provider/timeframe engine
+
+Reason:
+    These were deliberately left intact to preserve backward
+    compatibility. The main live path is already functioning.
+
+REPLACEMENT
+-----------
+
+The standalone files are supplied separately:
+    api_service_FIXED.py
+    timeframe_registry_FIXED.py
+
+A complete project copy is also supplied as:
+    universal_candlestick_engine_FIXED.zip
+
+IMPORTANT
+---------
+
+Replace api/service.py first and deploy/test.
+Then replace timeframe/registry.py.
+
+After deployment, test at minimum:
+    1m, 5m, 15m, 30m, 45m
+    1H, 2H, 4H, 8H
+    1D, 2D, 5D, 15D
+    1W, 2W, 4W
+    1M, 3M, 12M
+
+The existing 1H GOLD and CRUDEOIL screenshots already prove that
+the Angel One live-data path is functioning before these additional
+changes.
