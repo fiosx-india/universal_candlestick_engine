@@ -6,62 +6,8 @@ import numpy as np
 import pandas as pd
 
 from constants import TIMEFRAMES, PATTERN_GROUPS
+from historical.outcomes import forward_outcomes_all
 from data.angel_one import AngelOneDataClient
-
-
-# ============================================================
-# CANONICAL TIMEFRAME NORMALIZATION
-# ============================================================
-
-def _normalize_timeframe(value):
-    """
-    Normalize timeframe names without confusing minutes ('m')
-    with months ('M').
-
-    Canonical forms:
-        minute: 1m, 5m, 15m, 30m, 45m
-        hour:   1H ... 8H
-        day:    1D ... 15D
-        week:   1W ... 4W
-        month:  1M ... 12M
-    """
-    raw = str(value or "").strip()
-
-    if not raw:
-        raise ValueError("Timeframe cannot be empty.")
-
-    compact = raw.replace(" ", "")
-
-    minute_match = re.fullmatch(
-        r"(\d+)(m|min|mins|minute|minutes)",
-        compact,
-    )
-    if minute_match is None:
-        # Accept textual minute aliases case-insensitively, but
-        # never reinterpret uppercase "M" (month) as minute.
-        textual = re.fullmatch(
-            r"(\d+)(min|mins|minute|minutes)",
-            compact,
-            re.IGNORECASE,
-        )
-        minute_match = textual
-    if minute_match:
-        candidate = f"{int(minute_match.group(1))}m"
-        if candidate in TIMEFRAME_SETTINGS:
-            return candidate
-
-    upper = compact.upper()
-
-    if upper in {"60M", "60MIN", "1HR", "1HOUR"}:
-        return "1H"
-
-    if upper in {"1MO", "1MONTH"}:
-        return "1M"
-
-    if upper in TIMEFRAME_SETTINGS:
-        return upper
-
-    raise ValueError(f"Unsupported timeframe: {value}")
 
 
 # ============================================================
@@ -101,7 +47,7 @@ TIMEFRAME_SETTINGS = {
     },
 
     # 45m is built from 15m candles.
-    # Angel One does not provide a native 45m interval; build it from 15m.
+    # Do NOT request a native 45m Yahoo interval.
     "45m": {
         "interval": "15m",
         "period": "60d",
@@ -583,7 +529,9 @@ def _download_angel_data(
     api/service.py.
     """
 
-    timeframe = _normalize_timeframe(timeframe)
+    timeframe = str(
+        timeframe
+    ).strip().upper()
 
     if timeframe not in TIMEFRAME_SETTINGS:
         raise ValueError(
@@ -750,7 +698,9 @@ def _download_data(
     Yahoo Finance is intentionally NOT used here.
     """
 
-    timeframe = _normalize_timeframe(timeframe)
+    timeframe = str(
+        timeframe
+    ).strip().upper()
 
     if timeframe not in TIMEFRAME_SETTINGS:
         raise ValueError(
@@ -801,37 +751,84 @@ def _download_data(
 
 def _aggregate_ohlcv(data, timeframe):
     """
-    Convert downloaded base candles into the requested timeframe.
+    Convert base candles into the requested timeframe.
 
-    Minute aggregation is special:
-        45m = 3 x 15m
+    Examples:
+        1H  -> original 1H candles
+        2H  -> 2 x 1H candles
+        8H  -> 8 x 1H candles
 
-    Other derived timeframes use the configured base-timeframe
-    multiplier. Groups are intentionally sequential to preserve the
-    project's existing custom-timeframe semantics.
+        1D  -> original daily candles
+        2D  -> 2 x daily candles
+        15D -> 15 x daily candles
+
+        1W  -> original weekly candles
+        4W  -> 4 x weekly candles
+
+        1M  -> original monthly candles
+        12M -> 12 x monthly candles
     """
 
     if data is None or data.empty:
         return data
 
-    timeframe = _normalize_timeframe(timeframe)
+    # --------------------------------------------------------
+    # Validate timeframe
+    # --------------------------------------------------------
 
-    settings = TIMEFRAME_SETTINGS.get(timeframe)
-    if settings is None:
-        raise ValueError(f"Unsupported timeframe: {timeframe}")
+    timeframe = str(timeframe).strip().upper()
 
-    multiplier = int(settings.get("multiplier", 1))
+    # --------------------------------------------------------
+    # Extract numeric multiplier
+    # --------------------------------------------------------
+
+    number = ""
+
+    for char in timeframe:
+        if char.isdigit():
+            number += char
+        else:
+            break
+
+    multiplier = int(number) if number else 1
+
+    unit = timeframe[len(number):]
+
+    # --------------------------------------------------------
+    # Base timeframe needs no aggregation
+    # --------------------------------------------------------
 
     if multiplier <= 1:
         return data.copy()
 
-    frame = data.copy().sort_index()
+    # --------------------------------------------------------
+    # Validate supported timeframe units
+    # --------------------------------------------------------
+
+    if unit not in {"H", "D", "W", "M"}:
+        return data.copy()
+
+    # --------------------------------------------------------
+    # Work on a clean chronological copy
+    # --------------------------------------------------------
+
+    frame = data.copy()
+
+    frame = frame.sort_index()
+
+    # Remove duplicate timestamps
     frame = frame[
-        ~frame.index.duplicated(keep="last")
+        ~frame.index.duplicated(
+            keep="last"
+        )
     ]
 
     if frame.empty:
         return frame
+
+    # --------------------------------------------------------
+    # Required OHLC columns
+    # --------------------------------------------------------
 
     required_columns = [
         "Open",
@@ -852,6 +849,10 @@ def _aggregate_ohlcv(data, timeframe):
             f"Missing columns: {missing_columns}"
         )
 
+    # --------------------------------------------------------
+    # OHLCV aggregation rules
+    # --------------------------------------------------------
+
     aggregation = {
         "Open": "first",
         "High": "max",
@@ -859,13 +860,23 @@ def _aggregate_ohlcv(data, timeframe):
         "Close": "last",
     }
 
-    if "Volume" in frame.columns:
-        aggregation["Volume"] = "sum"
-
     if "Adj Close" in frame.columns:
         aggregation["Adj Close"] = "last"
 
-    group_id = np.arange(len(frame)) // multiplier
+    if "Volume" in frame.columns:
+        aggregation["Volume"] = "sum"
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Use sequential base candles.
+    #
+    # This keeps multi-period aggregation deterministic.
+    # --------------------------------------------------------
+
+    group_id = (
+        np.arange(len(frame))
+        // multiplier
+    )
 
     grouped = frame.groupby(
         group_id,
@@ -873,33 +884,61 @@ def _aggregate_ohlcv(data, timeframe):
         dropna=False,
     )
 
-    # Only complete groups are valid historical candles.
-    sizes = grouped.size()
-    complete_groups = sizes.index[sizes == multiplier]
+    aggregated = grouped.agg(
+        aggregation
+    )
 
-    if len(complete_groups) == 0:
-        return frame.iloc[0:0].copy()
-
-    aggregated = grouped.agg(aggregation).loc[
-        complete_groups
-    ]
+    # --------------------------------------------------------
+    # Preserve timestamp of final base candle
+    # --------------------------------------------------------
 
     last_indices = grouped.apply(
         lambda x: x.index[-1],
         include_groups=False,
-    ).loc[complete_groups]
+    )
 
     aggregated.index = pd.DatetimeIndex(
         last_indices.to_numpy()
     )
+
     aggregated.index.name = frame.index.name
 
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Do not return an incomplete final candle.
+    #
+    # Example:
+    # 8H requires 8 base candles.
+    # If only 3 candles are available in the final group,
+    # that incomplete 8H candle must not be treated as a
+    # completed historical candle.
+    # --------------------------------------------------------
+
+    remainder = len(frame) % multiplier
+
+    if remainder != 0:
+        aggregated = aggregated.iloc[:-1]
+
+    # --------------------------------------------------------
+    # Remove invalid OHLC rows
+    # --------------------------------------------------------
+
     aggregated = aggregated.dropna(
-        subset=required_columns
-    ).sort_index()
+        subset=[
+            "Open",
+            "High",
+            "Low",
+            "Close",
+        ]
+    )
+
+    # --------------------------------------------------------
+    # Final chronological ordering
+    # --------------------------------------------------------
+
+    aggregated = aggregated.sort_index()
 
     return aggregated
-
 
 # ============================================================
 # BASIC CANDLE CALCULATIONS
@@ -1257,296 +1296,27 @@ def _occurrence_indices(series):
 
 
 # ============================================================
-# NEXT-BAR HISTORICAL EVIDENCE
+# PROBABILITY ENGINE
 # ============================================================
 
-def _calculate_next_bar_outcome(
+def _calculate_probabilities(
     data,
     pattern_series,
 ):
-    """
-    Calculate historical direction after the *next completed bar*.
 
-    This deliberately uses one horizon only. The old implementation
-    mixed 1H/2H/.../12M outcomes from the same occurrences into one
-    probability, which double-counted evidence and made the displayed
-    probability ambiguous.
-    """
-
-    occurrence_indices = _occurrence_indices(
-        pattern_series
+    occurrence_indices = (
+        _occurrence_indices(
+            pattern_series
+        )
     )
 
     if not occurrence_indices:
-        return None
+        return {}
 
-    closes = pd.to_numeric(
-        data["Close"],
-        errors="coerce",
+    return forward_outcomes_all(
+        df=data,
+        occurrence_indices=occurrence_indices,
     )
-
-    returns = []
-
-    for idx in occurrence_indices:
-        positions = data.index.get_indexer([idx])
-
-        if len(positions) == 0:
-            continue
-
-        pos = int(positions[0])
-
-        if pos < 0 or pos + 1 >= len(data):
-            continue
-
-        start = closes.iloc[pos]
-        end = closes.iloc[pos + 1]
-
-        if pd.isna(start) or pd.isna(end):
-            continue
-
-        start = float(start)
-        end = float(end)
-
-        if start <= 0:
-            continue
-
-        returns.append(
-            (end / start) - 1.0
-        )
-
-    if not returns:
-        return None
-
-    arr = np.asarray(
-        returns,
-        dtype=float,
-    )
-
-    bullish = float(
-        (arr > 0.002).mean()
-    )
-    bearish = float(
-        (arr < -0.002).mean()
-    )
-    sideways = max(
-        0.0,
-        1.0 - bullish - bearish,
-    )
-
-    return {
-        "samples": int(len(arr)),
-        "bullish": bullish,
-        "bearish": bearish,
-        "sideways": sideways,
-        "median_return": float(np.median(arr)),
-        "mean_return": float(np.mean(arr)),
-        "win_rate": float((arr > 0).mean()),
-    }
-
-
-# ============================================================
-# CONTEXT / PROBABILITY HELPERS
-# ============================================================
-
-def _calculate_atr(data, window=14):
-    high = pd.to_numeric(
-        data["High"],
-        errors="coerce",
-    )
-    low = pd.to_numeric(
-        data["Low"],
-        errors="coerce",
-    )
-    close = pd.to_numeric(
-        data["Close"],
-        errors="coerce",
-    )
-
-    previous_close = close.shift(1)
-
-    tr = pd.concat(
-        [
-            high - low,
-            (high - previous_close).abs(),
-            (low - previous_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-
-    atr = tr.rolling(
-        window,
-        min_periods=max(5, window // 2),
-    ).mean()
-
-    value = atr.iloc[-1]
-    return (
-        float(value)
-        if pd.notna(value)
-        else None
-    )
-
-
-def _trend_strength(data):
-    """
-    Return a bounded 0..1 directional context score.
-
-    This is evidence strength, not a calibrated probability.
-    """
-    close = pd.to_numeric(
-        data["Close"],
-        errors="coerce",
-    )
-
-    if len(close) < 50:
-        return 0.0
-
-    fast = close.rolling(20).mean().iloc[-1]
-    slow = close.rolling(50).mean().iloc[-1]
-
-    if pd.isna(fast) or pd.isna(slow) or slow == 0:
-        return 0.0
-
-    spread = abs(float(fast / slow - 1.0))
-
-    slope = 0.0
-    if len(close) >= 10 and close.iloc[-10] != 0:
-        slope = abs(
-            float(
-                close.iloc[-1]
-                / close.iloc[-10]
-                - 1.0
-            )
-        )
-
-    strength = (
-        min(spread / 0.02, 1.0) * 0.6
-        + min(slope / 0.03, 1.0) * 0.4
-    )
-
-    return float(
-        max(0.0, min(1.0, strength))
-    )
-
-
-def _build_probability_estimate(
-    data,
-    trend,
-    patterns,
-    historical_evidence,
-):
-    """
-    Build a conservative evidence distribution.
-
-    Priority:
-        1. Historical next-bar evidence when available
-        2. Current detected pattern evidence
-        3. Trend context
-        4. Neutral prior
-
-    The output is an estimate, not a calibrated guarantee.
-    """
-
-    probabilities = {
-        "bullish": 1.0 / 3.0,
-        "bearish": 1.0 / 3.0,
-        "sideways": 1.0 / 3.0,
-    }
-
-    # Historical evidence gets the strongest weight when enough
-    # samples exist. Small samples are deliberately shrunk toward
-    # the neutral prior.
-    if historical_evidence:
-        samples = int(
-            historical_evidence.get("samples", 0)
-        )
-
-        if samples > 0:
-            confidence = min(
-                0.65,
-                samples / 50.0,
-            )
-
-            historical = {
-                "bullish": float(
-                    historical_evidence["bullish"]
-                ),
-                "bearish": float(
-                    historical_evidence["bearish"]
-                ),
-                "sideways": float(
-                    historical_evidence["sideways"]
-                ),
-            }
-
-            for key in probabilities:
-                probabilities[key] = (
-                    (1.0 - confidence)
-                    * probabilities[key]
-                    + confidence
-                    * historical[key]
-                )
-
-    # Pattern evidence is directional context.
-    pattern_votes = {
-        "bullish": 0.0,
-        "bearish": 0.0,
-        "sideways": 0.0,
-    }
-
-    for pattern in patterns:
-        direction = str(
-            pattern.direction
-        ).lower()
-
-        if direction in pattern_votes:
-            pattern_votes[direction] += max(
-                0.0,
-                min(
-                    1.0,
-                    float(pattern.confidence),
-                ),
-            )
-
-    vote_total = sum(
-        pattern_votes.values()
-    )
-
-    if vote_total > 0:
-        pattern_distribution = {
-            key: pattern_votes[key] / vote_total
-            for key in pattern_votes
-        }
-
-        for key in probabilities:
-            probabilities[key] = (
-                0.75 * probabilities[key]
-                + 0.25 * pattern_distribution[key]
-            )
-
-    # Trend is context, not certainty.
-    strength = _trend_strength(data)
-
-    if trend == "BULLISH":
-        probabilities["bullish"] += 0.12 * strength
-        probabilities["bearish"] -= 0.06 * strength
-    elif trend == "BEARISH":
-        probabilities["bearish"] += 0.12 * strength
-        probabilities["bullish"] -= 0.06 * strength
-
-    probabilities = {
-        key: max(
-            0.0,
-            float(value),
-        )
-        for key, value in probabilities.items()
-    }
-
-    total = sum(probabilities.values()) or 1.0
-
-    return {
-        key: value / total
-        for key, value in probabilities.items()
-    }
 
 
 # ============================================================
@@ -1559,52 +1329,36 @@ def analyze(
     period=None,
 ):
     """
-    Analyze one exact Angel One instrument.
+    Analyze the exact Angel One instrument selected by the UI.
 
-    Backward compatibility:
-        - Current UI passes the selected instrument dictionary.
-        - Older callers may pass a symbol string; that path resolves
-          the instrument through Angel One before downloading data.
+    The UI passes the complete instrument dictionary containing:
+        exchange
+        tradingsymbol
+        symboltoken
+
+    The analysis path therefore uses the exact Angel One
+    exchange + trading symbol + symbol token.
     """
 
     # --------------------------------------------------------
-    # Resolve instrument
+    # Validate instrument
     # --------------------------------------------------------
 
-    if isinstance(instrument, dict):
-        selected = instrument.copy()
-    elif isinstance(instrument, str):
-        requested = instrument.strip().upper()
-
-        if not requested:
-            raise ValueError("Instrument symbol cannot be empty.")
-
-        if requested.endswith(".BO"):
-            exchange = "BSE"
-        else:
-            exchange = "NSE"
-
-        client = _get_angel_client()
-        selected = client.resolve_instrument(
-            exchange=exchange,
-            query=requested,
-        )
-    else:
+    if not isinstance(instrument, dict):
         raise TypeError(
-            "instrument must be an Angel One instrument dictionary "
-            "or a symbol string."
+            "instrument must be the selected Angel One instrument."
         )
 
     exchange = str(
-        selected.get("exchange", "")
+        instrument.get("exchange", "")
     ).strip().upper()
 
     symbol = str(
-        selected.get("tradingsymbol", "")
+        instrument.get("tradingsymbol", "")
     ).strip().upper()
 
     symboltoken = str(
-        selected.get("symboltoken", "")
+        instrument.get("symboltoken", "")
     ).strip()
 
     if not exchange:
@@ -1624,10 +1378,12 @@ def analyze(
         )
 
     # --------------------------------------------------------
-    # Canonical timeframe
+    # Validate timeframe
     # --------------------------------------------------------
 
-    timeframe = _normalize_timeframe(timeframe)
+    timeframe = str(
+        timeframe
+    ).strip().upper()
 
     if timeframe not in TIMEFRAMES:
         raise ValueError(
@@ -1658,33 +1414,122 @@ def analyze(
     # Candle + structure detection
     # --------------------------------------------------------
 
-    detected_names, all_patterns = _build_patterns(data)
+    detected_names, all_patterns = (
+        _build_patterns(data)
+    )
+
+    # --------------------------------------------------------
+    # Convert detected pattern names into PatternResult
+    # objects for the existing UI pattern_table().
+    #
+    # The existing project UI expects:
+    #     p.name
+    #     p.direction
+    #     p.state
+    #     p.confidence
+    # --------------------------------------------------------
 
     from models import PatternResult
 
     pattern_metadata = {
-        "Doji": ("SIDEWAYS", "CONFIRMED", 0.60),
-        "Hammer": ("BULLISH", "CONFIRMED", 0.72),
-        "Shooting Star": ("BEARISH", "CONFIRMED", 0.72),
-        "Bullish Engulfing": ("BULLISH", "CONFIRMED", 0.82),
-        "Bearish Engulfing": ("BEARISH", "CONFIRMED", 0.82),
-        "Bullish Marubozu": ("BULLISH", "CONFIRMED", 0.76),
-        "Bearish Marubozu": ("BEARISH", "CONFIRMED", 0.76),
-        "Inside Bar": ("SIDEWAYS", "CONFIRMED", 0.64),
-        "Morning Star": ("BULLISH", "CONFIRMED", 0.75),
-        "Evening Star": ("BEARISH", "CONFIRMED", 0.75),
-        "Three Line Strike": ("SIDEWAYS", "CONFIRMED", 0.64),
-        "V Reversal": ("BULLISH", "FORMING", 0.65),
-        "W Pattern": ("BULLISH", "FORMING", 0.68),
-        "M Pattern": ("BEARISH", "FORMING", 0.68),
+        "Doji": (
+            "SIDEWAYS",
+            "CONFIRMED",
+            0.60,
+        ),
+
+        "Hammer": (
+            "BULLISH",
+            "CONFIRMED",
+            0.72,
+        ),
+
+        "Shooting Star": (
+            "BEARISH",
+            "CONFIRMED",
+            0.72,
+        ),
+
+        "Bullish Engulfing": (
+            "BULLISH",
+            "CONFIRMED",
+            0.82,
+        ),
+
+        "Bearish Engulfing": (
+            "BEARISH",
+            "CONFIRMED",
+            0.82,
+        ),
+
+        "Bullish Marubozu": (
+            "BULLISH",
+            "CONFIRMED",
+            0.76,
+        ),
+
+        "Bearish Marubozu": (
+            "BEARISH",
+            "CONFIRMED",
+            0.76,
+        ),
+
+        "Inside Bar": (
+            "SIDEWAYS",
+            "CONFIRMED",
+            0.64,
+        ),
+
+        "Morning Star": (
+            "BULLISH",
+            "CONFIRMED",
+            0.75,
+        ),
+
+        "Evening Star": (
+            "BEARISH",
+            "CONFIRMED",
+            0.75,
+        ),
+
+        "Three Line Strike": (
+            "SIDEWAYS",
+            "CONFIRMED",
+            0.64,
+        ),
+
+        "V Reversal": (
+            "BULLISH",
+            "FORMING",
+            0.65,
+        ),
+
+        "W Pattern": (
+            "BULLISH",
+            "FORMING",
+            0.68,
+        ),
+
+        "M Pattern": (
+            "BEARISH",
+            "FORMING",
+            0.68,
+        ),
     }
 
     patterns = []
 
     for name in detected_names:
-        direction, state, confidence = pattern_metadata.get(
-            name,
-            ("SIDEWAYS", "FORMING", 0.50),
+
+        direction, state, confidence = (
+            pattern_metadata.get(
+                name,
+                (
+                    "SIDEWAYS",
+                    "FORMING",
+                    0.50,
+                ),
+            )
         )
 
         patterns.append(
@@ -1704,30 +1549,48 @@ def analyze(
         )
 
     # --------------------------------------------------------
-    # Trend / volatility
+    # Trend
     # --------------------------------------------------------
 
-    trend = _calculate_trend(data)
-    volatility = _calculate_volatility(data)
+    trend = _calculate_trend(
+        data
+    )
 
     # --------------------------------------------------------
-    # Historical next-bar evidence
-    #
-    # IMPORTANT:
-    # Only one horizon is blended into the current probability.
-    # The old code summed every horizon from 1H through 12M,
-    # which counted the same historical occurrence repeatedly.
+    # Volatility
     # --------------------------------------------------------
 
-    historical_evidence = None
+    volatility = _calculate_volatility(
+        data
+    )
+
+    # --------------------------------------------------------
+    # Probability
+    # --------------------------------------------------------
+
+    probabilities = {
+        "bullish": 0.0,
+        "bearish": 0.0,
+        "sideways": 0.0,
+    }
+
+    historical_samples = 0
+
+    # --------------------------------------------------------
+    # Aggregate historical evidence from currently detected
+    # patterns.
+    # --------------------------------------------------------
 
     for pattern_name in detected_names:
-        series = all_patterns.get(pattern_name)
+
+        series = all_patterns.get(
+            pattern_name
+        )
 
         if series is None:
             continue
 
-        outcome = _calculate_next_bar_outcome(
+        outcome = _calculate_probabilities(
             data,
             series,
         )
@@ -1735,111 +1598,146 @@ def analyze(
         if not outcome:
             continue
 
-        if historical_evidence is None:
-            historical_evidence = {
-                "samples": 0,
-                "bullish": 0.0,
-                "bearish": 0.0,
-                "sideways": 0.0,
+        for horizon_result in outcome.values():
+
+            if not horizon_result:
+                continue
+
+            samples = int(
+                horizon_result.get(
+                    "samples",
+                    0,
+                )
+            )
+
+            if samples <= 0:
+                continue
+
+            historical_samples += samples
+
+            probabilities["bullish"] += (
+                float(
+                    horizon_result.get(
+                        "bullish_probability",
+                        0.0,
+                    )
+                )
+                * samples
+            )
+
+            probabilities["bearish"] += (
+                float(
+                    horizon_result.get(
+                        "bearish_probability",
+                        0.0,
+                    )
+                )
+                * samples
+            )
+
+            probabilities["sideways"] += (
+                float(
+                    horizon_result.get(
+                        "sideways_probability",
+                        0.0,
+                    )
+                )
+                * samples
+            )
+
+    # --------------------------------------------------------
+    # Historical normalization
+    # --------------------------------------------------------
+
+    if historical_samples > 0:
+
+        probabilities = {
+            key: value / historical_samples
+            for key, value in probabilities.items()
+        }
+
+    # --------------------------------------------------------
+    # Conservative fallback when there is no historical
+    # pattern evidence.
+    # --------------------------------------------------------
+
+    else:
+
+        if trend == "BULLISH":
+
+            probabilities = {
+                "bullish": 0.60,
+                "bearish": 0.15,
+                "sideways": 0.25,
             }
 
-        samples = int(
-            outcome["samples"]
-        )
+        elif trend == "BEARISH":
 
-        historical_evidence["samples"] += samples
-        historical_evidence["bullish"] += (
-            outcome["bullish"] * samples
-        )
-        historical_evidence["bearish"] += (
-            outcome["bearish"] * samples
-        )
-        historical_evidence["sideways"] += (
-            outcome["sideways"] * samples
-        )
+            probabilities = {
+                "bullish": 0.15,
+                "bearish": 0.60,
+                "sideways": 0.25,
+            }
 
-    if historical_evidence:
-        samples = historical_evidence["samples"]
+        else:
 
-        if samples > 0:
-            historical_evidence["bullish"] /= samples
-            historical_evidence["bearish"] /= samples
-            historical_evidence["sideways"] /= samples
+            probabilities = {
+                "bullish": 0.25,
+                "bearish": 0.25,
+                "sideways": 0.50,
+            }
 
-    probabilities = _build_probability_estimate(
-        data=data,
-        trend=trend,
-        patterns=patterns,
-        historical_evidence=historical_evidence,
+    # --------------------------------------------------------
+    # Final probability normalization
+    # --------------------------------------------------------
+
+    probabilities = {
+        key: max(
+            0.0,
+            float(value),
+        )
+        for key, value in probabilities.items()
+    }
+
+    total_probability = sum(
+        probabilities.values()
     )
 
-    # --------------------------------------------------------
-    # Confluence = evidence strength, NOT probability.
-    # --------------------------------------------------------
+    if total_probability <= 0:
 
-    if patterns:
-        pattern_confidence = float(
-            np.mean([
-                float(p.confidence)
-                for p in patterns
-            ])
-        )
+        probabilities = {
+            "bullish": 1.0 / 3.0,
+            "bearish": 1.0 / 3.0,
+            "sideways": 1.0 / 3.0,
+        }
+
     else:
-        pattern_confidence = 0.0
 
-    historical_strength = 0.0
-
-    if historical_evidence:
-        historical_strength = min(
-            1.0,
-            historical_evidence["samples"] / 50.0,
-        )
-
-    trend_strength = _trend_strength(data)
-
-    confluence = (
-        0.40 * pattern_confidence
-        + 0.35 * historical_strength
-        + 0.25 * trend_strength
-    )
+        probabilities = {
+            key: value / total_probability
+            for key, value in probabilities.items()
+        }
 
     # --------------------------------------------------------
-    # ATR-based projection zone
+    # Projection
     # --------------------------------------------------------
 
     last_price = float(
         data["Close"].iloc[-1]
     )
 
-    atr = _calculate_atr(data)
-
-    if atr is None or atr <= 0:
-        atr = max(
-            last_price * 0.01,
-            1e-8,
-        )
-
-    edge = (
-        probabilities["bullish"]
-        - probabilities["bearish"]
+    recent_high = float(
+        data["High"].tail(20).max()
     )
 
-    if edge > 0.08:
-        projection_direction = "BULLISH"
-    elif edge < -0.08:
-        projection_direction = "BEARISH"
-    else:
-        projection_direction = "SIDEWAYS"
+    recent_low = float(
+        data["Low"].tail(20).min()
+    )
 
     projection = {
-        "direction": projection_direction,
-        "upper_zone": last_price + atr,
-        "lower_zone": max(
-            0.0,
-            last_price - atr,
-        ),
-        "atr": atr,
-        "edge": edge,
+        "direction": trend,
+        "upper_zone": recent_high,
+        "lower_zone": recent_low,
     }
 
     # --------------------------------------------------------
@@ -1858,23 +1756,5 @@ def analyze(
         "patterns": patterns,
         "probabilities": probabilities,
         "projection": projection,
-        "historical_samples": (
-            int(
-                historical_evidence["samples"]
-            )
-            if historical_evidence
-            else 0
-        ),
-        "historical_evidence": (
-            {
-                "bullish": historical_evidence["bullish"],
-                "bearish": historical_evidence["bearish"],
-                "sideways": historical_evidence["sideways"],
-                "samples": historical_evidence["samples"],
-            }
-            if historical_evidence
-            else None
-        ),
-        "confluence": confluence,
-    }
-
+        "historical_samples": historical_samples,
+}
